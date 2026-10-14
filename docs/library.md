@@ -11,7 +11,7 @@ released together at the same version.
 | `@review-agent/cli` | the `review-agent` command — see [the CLI](cli.md) | all three |
 
 Each package ships compiled JavaScript with type declarations (`dist/`), and no source maps. The packages pin each
-other exactly: `@review-agent/github@0.1.1` requires `@review-agent/core@0.1.1`.
+other exactly: `@review-agent/github@0.1.2` requires `@review-agent/core@0.1.2`.
 
 The trigger.dev tasks are **not** in the published packages; they are deployed from this repository
 ([deploying](deploying.md#5-deploy-the-runner)).

@@ -89,15 +89,15 @@ export const probeClaude = task({
     // answer is still yes — set REVIEW_AGENT_CLAUDE_BIN to this and the engine is satisfied.
     const guess = `${process.cwd()}/node_modules/.bin/claude`
     const exists = await text(['/bin/sh', '-c', `test -x ${guess} && echo ${guess}`])
-    // Read at CALL time, exactly the way the engine reads it: claudeBinary() in
-    // packages/core/src/cli-process.ts is `process.env.REVIEW_AGENT_CLAUDE_BIN ?? 'claude'`. Null
+    // Read at CALL time, exactly the way the engine reads it: resolveClaudeBinary() in
+    // packages/core/src/cli-process.ts takes REVIEW_AGENT_CLAUDE_BIN first, when it is set. Null
     // on the first deployed run (nothing sets it yet) and the resolved path after Step 13's deploy
     // — the difference between those two runs is the whole proof that a layer's deploy.env works.
     // A filesystem path is not a credential; returning this one is safe, returning a key never is.
     const binEnv = process.env.REVIEW_AGENT_CLAUDE_BIN
     const claudeBinEnv = binEnv === undefined || binEnv === '' ? null : binEnv
     const binEnvRun = claudeBinEnv === null ? null : await text([claudeBinEnv, '--version'])
-    // Same precedence as claudeBinary(): the variable wins when it is set, so from Step 13 onward
+    // Same precedence as resolveClaudeBinary(): the variable wins when it is set, so from Step 13 onward
     // this field says what the engine itself would run.
     const resolvedPath = claudeBinEnv ?? commandV ?? (exists.out === '' ? null : exists.out)
     const version = resolvedPath === null ? { out: '', err: 'claude not found', code: null as number | null }

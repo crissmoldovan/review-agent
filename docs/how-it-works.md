@@ -47,6 +47,8 @@ claude -p --restricted --strict-mcp-config
   `.claude/settings.json`, which could otherwise define hooks, which are commands.
 - The only tools are **Read, Grep and Glob**: no shell, no writing, no network.
 - The prompt is written to the process's standard input, never its command line.
+- `claude` is resolved to an absolute path before it is started, from absolute `PATH` directories only and never from
+  the checkout, so the code under review cannot supply its own.
 - Its environment holds only `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER` and the model credential.
 
 ### What the model is told

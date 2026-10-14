@@ -28,10 +28,15 @@ review-agent review --repo <owner/name> --pr <number> [options]
 
 ### What it needs
 
-1. **The Claude Code CLI**, as `claude` on your `PATH`, or wherever `REVIEW_AGENT_CLAUDE_BIN` points. The
-   reviewer runs it headless. The hosted runner pins Claude Code `2.1.258`; the CLI uses whichever `claude` it
-   finds, and a version that does not accept the [flags the engine passes](how-it-works.md#how-the-model-is-run)
-   fails the review.
+1. **The Claude Code CLI**, as `claude` in a directory on your `PATH` (`claude.exe` on Windows), or wherever
+   `REVIEW_AGENT_CLAUDE_BIN` points. The reviewer runs it headless. The hosted runner pins Claude Code `2.1.258`; the
+   CLI uses whichever it finds, and a version that does not accept the
+   [flags the engine passes](how-it-works.md#how-the-model-is-run) fails the review.
+   - It is looked up **only in absolute `PATH` directories, and never inside the downloaded code** — see
+     [security](security.md#what-the-model-can-do).
+   - On Windows, install Claude Code with Anthropic's installer (`irm https://claude.ai/install.ps1 | iex` in
+     PowerShell) or `winget install Anthropic.ClaudeCode`: they put `claude.exe` on `PATH`. An npm install leaves
+     only `.cmd` scripts, which the reviewer does not run. Windows support is not yet tested; WSL2 works as Linux.
 2. **A model credential**, one of:
    - `ANTHROPIC_API_KEY` — an Anthropic API key, billed at per-token API prices;
    - `CLAUDE_CODE_OAUTH_TOKEN` — a subscription token from `claude setup-token`, drawn from that
@@ -112,7 +117,7 @@ With `--json`, stdout is the [review record](how-it-works.md#the-review-record).
 | `GITHUB_TOKEN`, or `GH_TOKEN` | yes | read access to the repository |
 | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | unless `claude` is logged in | the model credential |
 | `ANTHROPIC_BASE_URL` | must be unset | a set value refuses the run |
-| `REVIEW_AGENT_CLAUDE_BIN` | no | path to the `claude` binary; default `claude` from `PATH` |
+| `REVIEW_AGENT_CLAUDE_BIN` | no | the **absolute** path to the Claude Code binary, outside the reviewed code; a relative path is refused. Default: the first `claude` (`claude.exe` on Windows) in an absolute `PATH` directory |
 | `REVIEW_AGENT_SKILL_CACHE` | no | where [skills](configuration.md#skills) are cached; default `~/.cache/review-agent/skills`. **Must be an absolute path** — the directory is created on every review |
 | `REVIEW_AGENT_SKILLS_TOKEN` | no | a GitHub token for downloading private `git` skill sources |
 

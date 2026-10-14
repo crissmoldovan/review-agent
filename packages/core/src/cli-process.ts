@@ -1,10 +1,92 @@
 import { spawn } from 'node:child_process'
+import { accessSync, constants, realpathSync, statSync } from 'node:fs'
+import { posix, win32 } from 'node:path'
 import { z } from 'zod'
 import type { Usage } from './engine'
 
 export type CliRun = { envelope: unknown; usage: Usage; exitCode: number | null; stderr: string }
 
-export const claudeBinary = (): string => process.env.REVIEW_AGENT_CLAUDE_BIN ?? 'claude'
+/** Where the Claude Code binary is, as an ABSOLUTE path that is not inside `avoidDir` — the checkout of
+ *  the code under review.
+ *
+ *  Never a bare name. `spawn('claude')` hands the lookup to the OS, and on Windows the lookup searches
+ *  the child's working directory BEFORE `PATH` (libuv, `deps/uv/src/win/process.c`: "look in cwd
+ *  first, then scan path"). The working directory is the checkout, so a pull request that added
+ *  `claude.exe` at its root would be run in place of Claude, with the model credential in its
+ *  environment. POSIX does the same for an empty or `.` entry in `PATH`. So the lookup is done here,
+ *  in the parent: only absolute `PATH` directories, never one inside the checkout, and an explicit
+ *  `REVIEW_AGENT_CLAUDE_BIN` must be absolute and outside the checkout too.
+ *
+ *  On Windows only `claude.exe` is accepted — what Anthropic's native installer and WinGet put on
+ *  `PATH`. An npm install there leaves `.cmd`/`.ps1` shims, which `spawn` cannot run without a shell
+ *  (Node refuses `.cmd` since the April 2024 security release), and a shell is never used here: it
+ *  would not escape the arguments, which carry a repository's own review instructions. */
+export const resolveClaudeBinary = (a: {
+  env: Record<string, string | undefined>
+  avoidDir: string
+  platform?: NodeJS.Platform
+  isExecutableFile?: (path: string) => boolean
+  realpath?: (path: string) => string
+}): string => {
+  const platform = a.platform ?? process.platform
+  const path = platform === 'win32' ? win32 : posix
+  const isExecutableFile = a.isExecutableFile ?? executableFileTest(platform)
+  const real = a.realpath ?? realpathOrSelf
+  const avoid = real(path.resolve(a.avoidDir))
+  const inside = (candidate: string): boolean => {
+    const rel = path.relative(avoid, real(candidate))
+    return rel === '' || !(rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))
+  }
+
+  const named = a.env.REVIEW_AGENT_CLAUDE_BIN
+  if (named !== undefined && named !== '') {
+    if (!path.isAbsolute(named)) {
+      throw new Error('REVIEW_AGENT_CLAUDE_BIN must be an absolute path to the Claude Code binary; a relative one could resolve inside the code under review')
+    }
+    if (inside(named)) {
+      throw new Error('REVIEW_AGENT_CLAUDE_BIN points inside the checkout of the code under review; refusing to run it')
+    }
+    return named
+  }
+
+  const names = platform === 'win32' ? ['claude.exe'] : ['claude']
+  for (const dir of pathEntries(a.env, platform)) {
+    // '' and '.' — and any relative entry — would mean the working directory, which is the checkout.
+    if (dir === '' || !path.isAbsolute(dir)) continue
+    for (const name of names) {
+      const candidate = path.join(dir, name)
+      if (!isExecutableFile(candidate) || inside(candidate)) continue
+      return candidate
+    }
+  }
+  throw new Error(platform === 'win32'
+    ? 'Claude Code was not found: no claude.exe in an absolute PATH directory. Install it with Anthropic\'s installer (irm https://claude.ai/install.ps1 | iex) or WinGet, or set REVIEW_AGENT_CLAUDE_BIN to the absolute path of claude.exe'
+    : 'Claude Code was not found: no executable `claude` in an absolute PATH directory. Install Claude Code, or set REVIEW_AGENT_CLAUDE_BIN to its absolute path')
+}
+
+/** `PATH` as the platform spells it. On Windows the key may be `Path`, and a plain object copy of the
+ *  environment loses `process.env`'s case-insensitivity there. */
+const pathEntries = (env: Record<string, string | undefined>, platform: NodeJS.Platform): string[] => {
+  const key = platform === 'win32'
+    ? Object.keys(env).find((k) => k.toUpperCase() === 'PATH')
+    : 'PATH'
+  const value = key === undefined ? undefined : env[key]
+  return (value ?? '').split(platform === 'win32' ? ';' : ':')
+}
+
+const executableFileTest = (platform: NodeJS.Platform) => (p: string): boolean => {
+  try {
+    if (!statSync(p).isFile()) return false
+    if (platform !== 'win32') accessSync(p, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const realpathOrSelf = (p: string): string => {
+  try { return realpathSync(p) } catch { return p }
+}
 
 // Design §4.3: "the process environment holds only the model credential". A model that can Read
 // files could otherwise read its own environment — which, in the App deployment, is where the
@@ -93,7 +175,14 @@ export const spawnClaude = (a: {
     // Before anything is spawned, so nothing is spent and nothing reaches a gateway.
     const refusal = gatewayBaseUrlRefusal(process.env)
     if (refusal !== null) { reject(new Error(refusal)); return }
-    const child = spawn(claudeBinary(), a.argv, {
+    let bin: string
+    try {
+      bin = resolveClaudeBinary({ env: process.env, avoidDir: a.cwd })
+    } catch (e) {
+      reject(e instanceof Error ? e : new Error(String(e)))
+      return
+    }
+    const child = spawn(bin, a.argv, {
       cwd: a.cwd,
       env: childEnv(a.extraEnv),
       signal: a.signal,

@@ -200,8 +200,9 @@ const installClaudeNativeBinary = (): BuildExtension => ({
  *  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"`, which is the whole reason this
  *  extension exists rather than being tidy-up: there is no `ENV PATH` anywhere in the generated
  *  Containerfile and the base image does not put `node_modules/.bin` on PATH, so a bare `claude`
- *  is NOT resolvable in the deployed image. claudeBinary() in packages/core/src/cli-process.ts is
- *  `process.env.REVIEW_AGENT_CLAUDE_BIN ?? 'claude'`, and the fallback half of that would fail. */
+ *  is NOT resolvable in the deployed image. resolveClaudeBinary() in packages/core/src/cli-process.ts
+ *  takes REVIEW_AGENT_CLAUDE_BIN (absolute) first, else searches absolute PATH directories, and that
+ *  search would find nothing here. */
 export const CLAUDE_BIN_PATH = '/app/node_modules/.bin/claude'
 
 /** Sets that one variable, by the deploy, because a value typed into the dashboard is a deployment

@@ -25,6 +25,7 @@ The reviewed code goes to **your runner and to Anthropic, and nowhere else**.
 | `--restricted` and `--strict-mcp-config` | the reviewed repository's `.claude/settings.json` (which can define hooks — commands) and any MCP servers are not loaded |
 | an environment of `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER` and the model credential only | the model cannot read the GitHub token, the App key or anything else from its own environment |
 | the prompt on standard input; nothing the model wrote is put into a command line or a URL | no injection through arguments |
+| Claude Code is started by an **absolute path**, found only in absolute `PATH` directories and never inside the checkout; a relative `REVIEW_AGENT_CLAUDE_BIN` or one inside the checkout is refused | a pull request cannot plant its own `claude` (or `claude.exe`) and have it run with the model credential — Windows otherwise looks in the working directory first |
 | every finding's path checked against the checkout | a model-written string never addresses anything unchecked |
 | a hard spending ceiling per pass (`--max-budget-usd`) | a runaway review stops |
 

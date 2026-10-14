@@ -3,6 +3,27 @@
 All four packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app` and `@review-agent/cli` — are
 released together, at the same version.
 
+## 0.1.2
+
+### Security
+
+- **Claude Code is now started by an absolute path that cannot be inside the code under review.** Before, the
+  reviewer started it by the bare name `claude`, leaving the lookup to the operating system. **On Windows that lookup
+  searches the working directory first** — and the working directory is the downloaded pull request — so a pull
+  request that added a `claude.exe` at its root would have been run instead of Claude Code, **with the model
+  credential in its environment**. On Linux and macOS the same happened only if `PATH` contained an empty or `.` entry.
+  The GitHub App's runner was not affected: it sets `REVIEW_AGENT_CLAUDE_BIN` to an absolute path.
+
+  Now the reviewer finds Claude Code itself: `REVIEW_AGENT_CLAUDE_BIN` if set (it must be absolute and outside the
+  checkout, or the review is refused), otherwise the first `claude` — `claude.exe` on Windows — in an **absolute**
+  `PATH` directory that is not inside the checkout. Empty and relative `PATH` entries are skipped.
+
+  **If you ran `review-agent review` on Windows against a pull request you did not trust, rotate the Anthropic
+  credential it used.**
+
+- On Windows only `claude.exe` is run, as installed by Anthropic's installer or WinGet; an npm install's `.cmd` shim is
+  not, because running it needs a shell that would not escape the reviewer's arguments.
+
 ## 0.1.1
 
 ### Re-reviews ask the model instead of guessing
