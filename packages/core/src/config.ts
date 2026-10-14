@@ -18,6 +18,8 @@ export type SkillSource =
   | { kind: 'dir'; path: string }
   | { kind: 'git'; repo: string; ref: string; path?: string }
 
+/** `agents` is not read since 0.2.0: how many reviewers run is the multi-reviewer mode's, asked for per
+ *  request (`resolveSettings`). Kept so a deployment's own tier table still type-checks. */
 export type TierSettings = { agents: number; effort: Effort; check: boolean; budgetUsd: number }
 export type SeverityBands = { critical: number; high: number; medium: number }
 
@@ -60,6 +62,12 @@ export type DeploymentConfig = {
    *  `reviewSystemPrompt` (design §4.7); it can never replace them. */
   instructions?: string
   autoReview: 'open+ready' | 'off'
+  /** Whether a request may ask for the multi-reviewer mode (`--multi`, spec 0.2.0 §8.3). On by default:
+   *  it is only ever on request — an automatic review never runs it — and in the App only from someone
+   *  with push access, the gate every requested review already passes (decision §14.19). Off, a
+   *  `--multi` is refused and named in the summary, and the review runs one reviewer. It costs roughly
+   *  the tier's cost once per focus, so a deployment paying for every request may want it off. */
+  allowMulti: boolean
 }
 
 export type RepoConfig = {
@@ -148,6 +156,7 @@ export const defaultDeploymentConfig = (): DeploymentConfig => ({
   },
   skills: [],
   autoReview: 'open+ready',
+  allowMulti: true,
 })
 
 /** The string a repo writes in `.review-agent/review.md` to select a source the deployment already
@@ -205,7 +214,17 @@ export const resolveSettings = (a: {
   const model = request.model ?? deployment.model
   const effort = request.effort ?? tierSettings.effort ?? deployment.effort
   const check = request.check ?? tierSettings.check
-  const multi = request.multi ?? tierSettings.agents > 1
+  // Asked for, never configured (spec 0.2.0 §14.16 and §14.19). It used to fall back to the tier's
+  // `agents > 1`, which cost nothing while nothing ran several reviewers; since 0.2.0 it runs them, and
+  // that fallback would let a deployment's tier table turn an AUTOMATIC review — and a bare
+  // `--tier` — into one that costs three, which decision §14.19 took (a) to rule out. `agents` is
+  // read by nothing now; it stays in `TierSettings` so a deployment's existing table still parses.
+  // And only where the deployment allows it (§14.19). Every doorway refuses a disallowed `--multi`
+  // before it gets here, in words of its own (`refuseUnbuilt`); this is the same rule for a caller that
+  // reaches `runReview` past every doorway, and it is named like any other key the deployment refused.
+  const multiAllowed = deployment.allowMulti !== false
+  const multi = request.multi === true && multiAllowed
+  if (request.multi === true && !multiAllowed) droppedRequestKeys.push('multi')
 
   const budget = budgetFor(tierSettings, request.budgetUsd)
   if (request.budgetUsd !== undefined && budget.targetUsd !== roundUsd(request.budgetUsd)) {

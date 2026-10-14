@@ -4,6 +4,8 @@ import { MARKER_OPEN, RERUN_IDENTIFIER } from '@review-agent/github'
 import { MULTI_REFUSED, decideDelivery, encodeRequestRefinement, isReleaseOnly, parseCommandFlags, skipAsReleaseOnly } from './decide'
 
 const deployment = defaultDeploymentConfig()
+/** A deployment that switched the multi-reviewer mode off (spec 0.2.0 §14.19). */
+const noMulti = { ...defaultDeploymentConfig(), allowMulti: false }
 
 const pullRequestPayload = (over: Record<string, unknown> = {}) => ({
   action: 'opened',
@@ -26,6 +28,15 @@ describe('decideDelivery on a pull_request event', () => {
       installationId: 4242,
       request: { repo: 'acme/widgets', pr: 25, headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f' },
     })
+  })
+
+  // Spec 0.2.0 §8.3 point 5, decision §14.19: the multi-reviewer mode is never automatic. Nothing on a
+  // pull_request delivery can ask for it, whatever the deployment allows.
+  it('never asks an automatic review for several reviewers', () => {
+    for (const action of ['opened', 'ready_for_review']) {
+      const got = decideDelivery({ delivery: { event: 'pull_request', payload: pullRequestPayload({ action, multi: true }) }, deployment })
+      expect(got.kind === 'review' && 'multi' in got.request).toBe(false)
+    }
   })
 })
 
@@ -154,14 +165,12 @@ describe('the flags a comment may carry', () => {
     expect(got.refused.join('\n')).toContain('`--budget lots`')
   })
 
-  it('refuses --multi until the multi-reviewer mode is built, and names it', () => {
-    // Criss, 2026-09-14 (decision 4). The fan-out is not built yet (spec 0.2.0 §8.3), so a comment
-    // cannot buy it. The review still runs, with one reviewer.
+  it('takes --multi, which asks for the multi-reviewer mode since 0.2.0 (spec 0.2.0 §8.3, §14.16)', () => {
+    // Refused until the mode was built. The parser no longer decides whether it runs: the deployment's
+    // switch (decideDelivery, the runner) and the requester's push access (the runner) do.
     const got = parseCommandFlags('--multi --check')
-    expect(got.request).toEqual({ check: true })
-    expect(got.refused).toEqual([
-      '`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.',
-    ])
+    expect(got.request).toEqual({ multi: true, check: true })
+    expect(got.refused).toEqual([])
   })
 
   it('refuses with the github package’s own sentences and function, re-exported for the receiver', async () => {
@@ -173,11 +182,12 @@ describe('the flags a comment may carry', () => {
     expect(receiver.THOROUGH_REFUSED).toBe(github.THOROUGH_REFUSED)
   })
 
-  it('takes --tier thorough, which is one reviewer at high effort since 0.2.0 (spec §14.1)', () => {
-    // It was refused with --multi while it was going to mean the fan-out. It now buys what it says.
+  it('takes --tier thorough, which is one reviewer at high effort since 0.2.0 (spec §14.1), and combines it with --multi', () => {
+    // It was refused with --multi while it was going to mean the fan-out. It now buys what it says,
+    // and --multi says how many of it (§14.16).
     const got = parseCommandFlags('--tier thorough --multi')
-    expect(got.request).toEqual({ tier: 'thorough' })
-    expect(got.refused).toEqual([MULTI_REFUSED])
+    expect(got.request).toEqual({ tier: 'thorough', multi: true })
+    expect(got.refused).toEqual([])
   })
 
   it('leaves the free text alone', () => {
@@ -203,15 +213,30 @@ describe('the flags a comment may carry', () => {
     expect(unknown.kind === 'review' && unknown.request.brief).toBe('--verbose look at the lock file')
   })
 
-  it('carries the refusals on the decision, so they can reach the summary', () => {
+  it('asks for several reviewers when a comment says --multi, and keeps the rest of the line as the brief', () => {
     const body = '/review --multi --tier thorough the migration is the risky part'
     const got = decideDelivery({ delivery: { event: 'issue_comment', payload: commentPayload(body) }, deployment })
 
+    expect(got.kind === 'review' && got.request).toMatchObject({
+      tier: 'thorough', multi: true, brief: 'the migration is the risky part', requestId: '903112',
+    })
+    expect(got.kind === 'review' && got.refused).toBeUndefined()
+  })
+
+  it('carries the refusals on the decision, so they can reach the summary', () => {
+    // A deployment that switched the mode off (spec 0.2.0 §14.19): the review still runs, with one
+    // reviewer, and the summary says why.
+    const body = '/review --multi --tier thorough --effort ludicrous the migration is the risky part'
+    const got = decideDelivery({ delivery: { event: 'issue_comment', payload: commentPayload(body) }, deployment: noMulti })
+
     expect(got.kind).toBe('review')
     expect(got.kind === 'review' && got.request.tier).toBe('thorough')
-    expect(got.kind === 'review' && got.request.multi).toBeUndefined()
+    expect(got.kind === 'review' && 'multi' in got.request).toBe(false)
     expect(got.kind === 'review' && got.request.brief).toBe('the migration is the risky part')
-    expect(got.kind === 'review' && got.refused).toEqual(['`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.'])
+    expect(got.kind === 'review' && got.refused).toEqual([
+      '`--effort ludicrous` — not a value this flag takes, so the deployment’s default was used.',
+      '`--multi` — this deployment does not run several reviewers on one review, so one reviewer ran.',
+    ])
   })
 })
 
@@ -321,11 +346,9 @@ describe('decideDelivery on the check run Re-run action', () => {
     expect(got.kind === 'review' && got.refused).toBeUndefined()
   })
 
-  it('repeats a thorough tier a check run carried, refuses the fan-out, and names it', () => {
-    // Criss, 2026-09-14 (decision 4). The comment parser never lets `multi` onto a request, but
-    // external_id is a string that came back from GitHub, and a Re-run that repeated it would ask
-    // for a fan-out that does not exist yet. `thorough` is one reviewer at high effort since 0.2.0
-    // (spec §14.1), and a Re-run repeats it like any other tier.
+  it('repeats a multi-reviewer review a check run carried, since a button press is a request (spec 0.2.0 §14.19)', () => {
+    // `thorough` is one reviewer at high effort since 0.2.0 (spec §14.1), and `multi` runs several of
+    // it: a Re-run repeats both, and the runner still checks the presser can push before it spends.
     const external_id = encodeRequestRefinement({
       repo: 'acme/widgets', pr: 25, headSha: 'older', tier: 'thorough', multi: true, check: true,
     })
@@ -333,6 +356,21 @@ describe('decideDelivery on the check run Re-run action', () => {
       check_run: { id: 55005, head_sha: 'c0ffee0', external_id, pull_requests: [{ number: 25 }] },
     })
     const got = decideDelivery({ delivery: { event: 'check_run', payload }, deployment })
+
+    expect(got.kind === 'review' && got.request).toMatchObject({ tier: 'thorough', multi: true, check: true })
+    expect(got.kind === 'review' && got.refused).toBeUndefined()
+  })
+
+  it('repeats a thorough tier a check run carried, refuses the several reviewers this deployment switched off, and names it', () => {
+    // Criss, 2026-09-14 (decision 4): external_id is a string that came back from GitHub, written when
+    // the deployment may still have allowed the mode.
+    const external_id = encodeRequestRefinement({
+      repo: 'acme/widgets', pr: 25, headSha: 'older', tier: 'thorough', multi: true, check: true,
+    })
+    const payload = checkRunPayload({
+      check_run: { id: 55005, head_sha: 'c0ffee0', external_id, pull_requests: [{ number: 25 }] },
+    })
+    const got = decideDelivery({ delivery: { event: 'check_run', payload }, deployment: noMulti })
 
     expect(got.kind === 'review' && got.request.tier).toBe('thorough')
     expect(got.kind === 'review' && got.request.multi).toBeUndefined()

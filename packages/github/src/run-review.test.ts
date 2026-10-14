@@ -570,3 +570,102 @@ describe('runReview: the downloaded code', () => {
     expect(existsSync(join(dir, 'a.ts'))).toBe(true)
   })
 })
+
+/** An engine that answers as the focus it was started for — the focus line of the system prompt is
+ *  the one thing that differs between them. A focus with no entry answers RESULT. */
+const focusEngine = (answers: Partial<Record<'intent' | 'impact' | 'security', EngineResult>> = {}) =>
+  vi.fn(async (i: EngineInput): Promise<EngineResult> => {
+    const lens = (['intent', 'impact', 'security'] as const).find((l) => i.systemPrompt.includes(`Your focus: ${l}`))
+    return (lens === undefined ? undefined : answers[lens]) ?? RESULT
+  })
+const NOTHING_SPENT: Usage = { ...USAGE, costUsd: 0, turns: 0, durationMs: 0 }
+const quiet = (u: Usage = USAGE): EngineResult => ({ ...RESULT, usage: u, output: { ...OUTPUT, findings: [] } })
+
+describe('runReview: the multi-reviewer mode (spec 0.2.0 §8.3)', () => {
+  it('runs one engine pass per focus, each told its focus and given the tier’s whole budget', async () => {
+    const d = deps({ runEngine: focusEngine() })
+    const r = await run(d, { multi: true, tier: 'normal' })
+
+    const inputs = vi.mocked(d.runEngine).mock.calls.map((c) => c[0])
+    expect(inputs).toHaveLength(3)
+    expect(inputs.map((i) => ['intent', 'impact', 'security'].find((l) => i.systemPrompt.includes(`Your focus: ${l}`))).sort())
+      .toEqual(['impact', 'intent', 'security'])
+    for (const i of inputs) {
+      // Not a third each: every focus has the tier's own target and ceiling.
+      expect(i.settings.budget).toEqual({ targetUsd: 3, wrapUpAtUsd: 2.1, ceilingUsd: 7.5 })
+      expect(i.checkoutDir).toBe('/tmp/ra-fake-checkout')
+      expect(i.prompt).toBe(inputs[0].prompt)
+    }
+    expect(r.settings.multi).toBe(true)
+    expect(r.record.focuses.map((f) => f.lens)).toEqual(['intent', 'impact', 'security'])
+    expect(r.result.output?.findings.map((f) => f.lens)).toEqual(['intent', 'impact', 'security'])
+    // Every focus is billed: the record's usage is the three together.
+    expect(r.record.usage.costUsd).toBeCloseTo(USAGE.costUsd * 3, 6)
+    expect(d.notes.some((n) => n.startsWith('running 3 focused reviewers (intent, impact, security), 3 at a time'))).toBe(true)
+  })
+
+  it('runs one reviewer, and keeps no focuses, unless the request asks for several', async () => {
+    const d = deps()
+    const r = await run(d, { tier: 'thorough' })
+    expect(d.runEngine).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(d.runEngine).mock.calls[0][0].systemPrompt).not.toContain('Your focus:')
+    expect(r.record.focuses).toEqual([])
+    expect(vi.mocked(d.runCheckPass).mock.calls[0][0]).not.toHaveProperty('focuses')
+  })
+
+  // Decision §14.17: one check pass over the union, told how many focuses reported anything.
+  it('sends the union to ONE check pass, sized by the focuses that reported findings', async () => {
+    const d = deps({ runEngine: focusEngine({ impact: quiet() }) })
+    const r = await run(d, { multi: true })
+    expect(d.runCheckPass).toHaveBeenCalledTimes(1)
+    const asked = vi.mocked(d.runCheckPass).mock.calls[0][0]
+    expect(asked.focuses).toBe(2)
+    expect(asked.findings).toBe(r.result.output?.findings)
+    expect(asked.findings.map((f) => f.lens)).toEqual(['intent', 'security'])
+  })
+
+  // §8.3 point 2.
+  it('does not fail the review when a focus fails, and says which one went without', async () => {
+    const d = deps({
+      runEngine: focusEngine({
+        security: { output: null, usage: NOTHING_SPENT, cutShort: false, wrapUpFired: false, failure: { kind: 'schema' } },
+      }),
+    })
+    const r = await run(d, { multi: true })
+    expect(r.result.failure).toBeNull()
+    expect(r.result.output?.findings).toHaveLength(2)
+    expect(r.record.focuses.find((f) => f.lens === 'security')).toMatchObject({ finished: false, failure: { kind: 'schema' } })
+    expect(d.notes).toContain('the security reviewer returned no answer (schema); the review goes on without it')
+  })
+
+  it('runs no more focuses at once than the deployment allows', async () => {
+    const most = async (concurrency?: number): Promise<number> => {
+      let active = 0
+      let peak = 0
+      const d = deps({
+        ...(concurrency !== undefined && { concurrency }),
+        runEngine: vi.fn(async () => {
+          active += 1
+          peak = Math.max(peak, active)
+          await new Promise((r) => setTimeout(r, 10))
+          active -= 1
+          return RESULT
+        }),
+      })
+      await run(d, { multi: true })
+      return peak
+    }
+    expect(await most(1)).toBe(1)
+    // Left out: every focus at once (DEFAULT_FOCUS_CONCURRENCY).
+    expect(await most()).toBe(3)
+  })
+
+  it('asks a re-review’s question within every focus’s ceiling, not one focus’s', async () => {
+    const d = deps({ runEngine: focusEngine() })
+    await run(d, { multi: true }, [PREVIOUS])
+    const asked = vi.mocked(d.runRecheckPass).mock.calls[0][0]
+    // Three basic focuses, $5.00 each.
+    expect(asked.ceilingUsd).toBe(15)
+    expect(asked.spentUsd).toBeCloseTo(USAGE.costUsd * 3 + CHECK_USAGE.costUsd, 6)
+  })
+})

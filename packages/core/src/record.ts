@@ -3,6 +3,7 @@ import type { CheckVerdict } from './check-pass'
 import type { DeploymentConfig, Effort, ResolvedSettings, ReviewRequest, Tier } from './config'
 import type { EngineFailure, EngineResult, Usage } from './engine'
 import type { ReviewOutput } from './findings'
+import { focusRecords, type FocusRecord, type FocusRun } from './multi'
 import { REVIEW_INSTRUCTIONS_DIGEST, REVIEW_INSTRUCTIONS_VERSION } from './prompt'
 import type { RecheckJudgement, RecheckPassResult, RecheckSkipped } from './recheck-pass'
 import type { MaterialisedSkill } from './skills'
@@ -34,19 +35,28 @@ export type ReviewRecord = {
   }
   settings: {
     tier: Tier; model: string; effort: Effort; check: boolean; multi: boolean
+    /** The tier's budget, which a multi-reviewer review gives EACH focus (spec 0.2.0 §8.3): its
+     *  reviewers may spend up to `focuses.length` times `ceilingUsd` between them. */
     budget: BudgetPolicy
     report: DeploymentConfig['report']
     severity: DeploymentConfig['severity']
   }
   skills: RecordedSkill[]
+  /** The reviewer's bill — on a multi-reviewer review, the sum of every focus's, which `focuses` has
+   *  one by one. Its `durationMs` is then process time added up, not the wall clock (`timings`). */
   usage: Usage
+  /** One entry per focused reviewer, in `REVIEW_LENSES` order: its bill, whether it answered, whether a
+   *  limit stopped it, its failure, and how many findings it reported (spec 0.2.0 §8.3 point 6). Empty
+   *  on a review by one reviewer. Added in 0.2.0 without moving `recordVersion`: nothing that was
+   *  already here changed meaning. */
+  focuses: FocusRecord[]
   checkUsage: Usage | null
   /** The re-review pass's own bill (Criss, 2026-09-16). `null` on a first review, which buys no such
    *  pass at all, and on any caller that reads no marker. NOT null when the pass failed: a failure
    *  reports whatever it was billed, which is zero when it never spawned. */
   recheckUsage: Usage | null
   /** Every figure in this record is model spend at per-token API prices, as the Claude Code CLI
-   *  reported it: `usage` + `checkUsage` + `recheckUsage`. It is not a subscription allowance and
+   *  reported it: `usage` + `checkUsage` + `recheckUsage`, every focus included through `usage`. It is not a subscription allowance and
    *  not a price charged to anyone — a deployment running on a subscription token still gets an
    *  API-priced figure here, which is why the public summary says so next to it. */
   costUsd: number
@@ -84,6 +94,9 @@ export const buildReviewRecord = (a: {
   skills: MaterialisedSkill[]
   check: { verdicts: CheckVerdict[]; usage: Usage } | null
   recheck: RecheckPassResult | null
+  /** The focused reviewers of a multi-reviewer review, whose combined result is `result`. Absent, or
+   *  empty, for a review by one reviewer. */
+  focuses?: FocusRun[]
   removedFromCheckout: string[]
   /** Optional, so a caller that downloads no archive of its own need not invent one; absent is "none". */
   notWrittenToCheckout?: UnwrittenEntry[]
@@ -112,6 +125,7 @@ export const buildReviewRecord = (a: {
     },
     skills: a.skills.map((s) => ({ id: s.id, path: s.path })),
     usage: { ...result.usage },
+    focuses: focusRecords(a.focuses ?? []),
     checkUsage: a.check === null ? null : { ...a.check.usage },
     recheckUsage: a.recheck === null ? null : { ...a.recheck.usage },
     costUsd: result.usage.costUsd + (a.check?.usage.costUsd ?? 0) + (a.recheck?.usage.costUsd ?? 0),

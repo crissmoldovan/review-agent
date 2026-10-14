@@ -43,7 +43,7 @@ The same check when you already have the header's value — and the check for th
 ### `decideDelivery({ delivery: { event, payload }, deployment }) → Decision`
 
 Pure, no network. `event` is the `x-github-event` header; `payload` the parsed body; `deployment` a
-`DeploymentConfig`, of which only `command` and `autoReview` are read. Returns:
+`DeploymentConfig`, of which only `command`, `autoReview` and `allowMulti` are read. Returns:
 
 - `{ kind: 'review', request, installationId, refused? }` — `refused` lists, in words, what a comment asked for and
   was not given;
@@ -52,8 +52,8 @@ Pure, no network. `event` is the `x-github-event` header; `payload` the parsed b
 The rules are in [using it on pull requests](pull-requests.md#when-it-reviews). Helpers it uses are exported too:
 `parseCommandFlags`, `encodeRequestRefinement` / `decodeRequestRefinement` (the settings a check run's Re-run button
 carries), `isReleaseOnly`, `isAutomatic`, `skipAsReleaseOnly`, `HEAD_SHA_UNRESOLVED`; and, re-exported from
-`@review-agent/github` where they live since 0.2.0, `refuseUnbuilt` and `MULTI_REFUSED`. `THOROUGH_REFUSED` is still
-exported but deprecated: nothing refuses `--tier thorough` since 0.2.0.
+`@review-agent/github` where they live since 0.2.0, `refuseUnbuilt`, `MULTI_REFUSED` and `MULTI_REFUSED_AUTOMATIC`.
+`THOROUGH_REFUSED` is still exported but deprecated: nothing refuses `--tier thorough` since 0.2.0.
 
 ### `dispatchReview({ request, installationId, refused?, trigger }) → { runId, idempotencyKey }`
 
@@ -101,15 +101,15 @@ The package root adds the App's identity and registration, which **must not** be
 |---|---|
 | The review session | `prepareReview(…)` and `runReviewSession(…)` — a whole review, the same whichever way in asked for it; see [the review session](#the-review-session). `SessionResult` (`reviewed` \| `unfinished` \| `failed`), `PreparedReview`, `SessionDeps`, `DEFAULT_SESSION_DEADLINE_MS`; the rules it shares with the App's runner: `mayRetry(record)`, `failureSentence(record)`, `saidSafely(text)`, `postedCommentsOf(published)` |
 | Reporting on the commit | `reporterFor({ octokit, want, identity?, onStarted? })` — `'auto'` \| `'check-run'` \| `'commit-status'` \| `'none'`; `checkRunReporter`, `commitStatusReporter`, `noReporter`; `tokenIdentityOf(octokit)`; `statusFor(…)`, `MAX_STATUS_DESCRIPTION_CHARS` |
-| Clients and gates | `octokitFor({ token, baseUrl?, fetch? })` — a client with the API version pinned, `baseUrl` for GitHub Enterprise Server; `GITHUB_API_VERSION`; `pushAccessOf({ octokit, owner, repo, username })`; `refuseUnbuilt(request)`, `MULTI_REFUSED` |
-| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with. `defaultRunReviewDeps({ note, workDir?, skillCacheDir? })` — its real collaborators, as the CLI and the App's runner wire them |
+| Clients and gates | `octokitFor({ token, baseUrl?, fetch? })` — a client with the API version pinned, `baseUrl` for GitHub Enterprise Server; `GITHUB_API_VERSION`; `pushAccessOf({ octokit, owner, repo, username })`; `refuseUnbuilt(request, { allowMulti?, automatic? })` — drops and names a `multi` the deployment switched off (`MULTI_REFUSED`) or an automatic review carried (`MULTI_REFUSED_AUTOMATIC`) |
+| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with. `defaultRunReviewDeps({ note, workDir?, skillCacheDir?, concurrency? })` — its real collaborators, as the CLI and the App's runner wire them; `concurrency` is how many focused reviewers of a [multi-reviewer review](configuration.md#the-multi-reviewer-mode) run at once (3; the App's runner says 1) |
 | Posting it | `publishReview({ …, via, selfLogin?, ignoreRepliesFrom? })` — the summary, inline comments, edits to earlier comments and the marker. `via` is how the review ran, which the first line of every body says |
 | Reading GitHub | `fetchPullRequest`, `downloadArchive` (with `sanitiseCheckout`, `isCredentialPath` and `pathCollisions`; it also returns the entries it could not write), `fetchRepoConfig` / `parseRepoConfig` / `REPO_CONFIG_PATH`, `fetchThreadReplies` |
-| Deciding what to say | `anchorFindings`, `selectForPosting` |
+| Deciding what to say | `anchorFindings`, `selectForPosting`, `duplicatesIn(check)` — the findings a multi-reviewer review's check pass marked as repeating an earlier one |
 | The check run | `createCheckRun`, `completeCheckRun`, `closeCheckRunIfInProgress`, `closeStaleCheckRuns`, `conclusionFor`, `checkRunOutput`, `annotationsFor`, `RERUN_ACTION` |
 | The marker | `encodeMarker`, `decodeMarker`, `findSummaryComment`, `upsertSummaryComment`, `recheckQuestions`, `nextMarkerState`, `applyOutcomes` |
 | Findings and replies | `findingId(finding)` — a 12-hex-character address for one finding in one run (a hash of file, category and title); `declaredOutcome(body)` — `'disputed'`, `'deferred'` or `null` for a reply |
-| Comment bodies | `summaryBody`, `inlineBody`, `reviewBody`, `retractionNote`, `reinstatementNote`, `automatedReviewLine`, `ReviewVia`, `PRODUCT_URL` |
+| Comment bodies | `summaryBody`, `inlineBody`, `reviewBody`, `retractionNote`, `reinstatementNote`, `automatedReviewLine`, `focusLine`, `ReviewVia`, `PRODUCT_URL` |
 | Writing | `postReview`, `retractInlineComment`, `reinstateInlineComment` |
 
 ## `@review-agent/core`
@@ -120,9 +120,10 @@ The package root adds the App's identity and registration, which **must not** be
 | Budgets | `budgetFor(tierSettings, requestBudgetUsd?)`, `BudgetPolicy`, `roundUsd` |
 | The engine | `runEngine(input)`, `buildArgv(…)`, `EngineInput`, `EngineResult`, `EngineFailure`, `Usage` |
 | Credentials | `modelCredentialFromEnv(env, { allowLogin })`, `ModelCredential`, `ClaudeRuntime`, `SecretValue`, `MODEL_CREDENTIAL_VARS`, `gatewayBaseUrlRefusal(env)` |
-| Prompts | `reviewSystemPrompt`, `checkPassSystemPrompt`, `recheckPassSystemPrompt`, `buildPrompt`, `REVIEW_INSTRUCTIONS_VERSION`, `REVIEW_INSTRUCTIONS_DIGEST`, `REVIEW_LENSES` |
+| Prompts | `reviewSystemPrompt`, `checkPassSystemPrompt({ markDuplicates? })`, `CHECK_DUPLICATES_TEXT`, `recheckPassSystemPrompt`, `buildPrompt`, `REVIEW_INSTRUCTIONS_VERSION`, `REVIEW_INSTRUCTIONS_DIGEST`, `REVIEW_LENSES` |
 | Findings | `Finding`, `ReviewOutput`, `parseReviewOutput`, `reviewJsonSchema`, `ParseError` |
-| The passes | `runCheckPass`, `CheckVerdict`; `runRecheckPass`, `RecheckJudgement`, `PreviousFinding` |
+| The passes | `runCheckPass({ findings, input, focuses? })`, `CheckVerdict`; `runRecheckPass({ …, ceilingUsd? })`, `RecheckJudgement`, `PreviousFinding` |
+| Several reviewers | `runFocusedReviews({ input, run, concurrency, onFailure? })` — one engine run per focus; `combineFocusRuns(runs)` — their answers as one result; `focusRecords(runs)`; `FocusRun`, `FocusRecord`, `DEFAULT_FOCUS_CONCURRENCY`. See [the multi-reviewer mode](configuration.md#the-multi-reviewer-mode) |
 | The record | `buildReviewRecord`, `ReviewRecord`, `UnwrittenEntry`, `RECORD_VERSION`, `ENGINE_VERSION` |
 | Secrets | `scanForSecrets`, `assertNoSecrets`, `SecretLeak` |
 | Skills | `materialiseSkills`, `defaultSkillCacheDir()`, `SkillError` |

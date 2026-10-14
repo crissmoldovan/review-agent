@@ -1,8 +1,8 @@
 import type { Octokit } from '@octokit/core'
 import {
   resolveSettings, scanForSecrets, SecretLeak, writesSummaryComment,
-  type ClaudeRuntime, type DeploymentConfig, type ReportMode, type RepoConfig, type ResolvedSettings,
-  type ReviewRecord, type ReviewRequest,
+  type ClaudeRuntime, type DeploymentConfig, type EngineFailure, type ReportMode, type RepoConfig,
+  type ResolvedSettings, type ReviewRecord, type ReviewRequest,
 } from '@review-agent/core'
 import type { ReviewVia } from './body'
 import {
@@ -41,11 +41,26 @@ export const saidSafely = (s: string): string =>
  *  to say — but it is model-adjacent text on a posting path, so it gets the same secret scan
  *  everything else posted gets (design §4.3). */
 export const failureSentence = (record: ReviewRecord): string => {
-  const f = record.failure
-  if (f === null) return 'the review completed'
+  if (record.failure === null) return 'the review completed'
+  // A multi-reviewer review fails only when every focus produced nothing (spec 0.2.0 §8.3 point 2),
+  // and `failure` is then the first focus's alone: each is named, so a reader is not sent looking at
+  // one focus's ceiling for a review whose other two crashed.
+  // `?? []`: a record written before 0.2.0 has no `focuses`, and this rule is exported for hosts that
+  // keep records.
+  const focuses = record.focuses ?? []
+  if (focuses.length > 0) {
+    return `none of the ${focuses.length} focused reviewers produced a review — ` +
+      focuses.map((f) => `${f.lens}: ${stopSentence(f.failure, record.settings.budget.ceilingUsd)}`).join('; ')
+  }
+  return stopSentence(record.failure, record.settings.budget.ceilingUsd)
+}
+
+/** Why one engine run produced nothing, in a sentence; `ceilingUsd` is the ceiling it ran under. */
+const stopSentence = (f: EngineFailure | null, ceilingUsd: number): string => {
+  if (f === null) return 'it returned no answer'
   switch (f.kind) {
     case 'budget':
-      return `the review stopped at its $${record.settings.budget.ceilingUsd.toFixed(2)} ceiling after $${f.spentUsd.toFixed(2)}`
+      return `the review stopped at its $${ceilingUsd.toFixed(2)} ceiling after $${f.spentUsd.toFixed(2)}`
     case 'schema': return 'the model could not produce a review in the required shape'
     case 'refusal': return 'the model answered in prose instead of the review schema'
     case 'crashed': return `the reviewer process crashed (exit ${String(f.code)})`
@@ -189,7 +204,7 @@ export type PreparedReview = {
   repo: string
   number: number
   deployment: DeploymentConfig
-  /** What was asked, minus the settings that are not built yet (`refuseUnbuilt`). */
+  /** What was asked, minus what the deployment does not allow (`refuseUnbuilt`). */
   ask: ReviewAsk
   /** Those settings, phrased, for the summary's "Not honoured" (Criss, decision 4). */
   refused: string[]
@@ -227,11 +242,14 @@ export async function prepareReview(a: {
   if (!Number.isInteger(a.number) || a.number <= 0) throw new TypeError(`number must be a pull request number, got ${String(a.number)}`)
   const fetchPullRequest = a.deps?.fetchPullRequest ?? fetchPullRequestLive
   const fetchRepoConfig = a.deps?.fetchRepoConfig ?? fetchRepoConfigLive
-  // Decision 4, for every way in: what is not built is dropped and named, never run in silence.
-  // Applied here, so the CLI and an SDK host refuse exactly what the App's receiver refuses. The
-  // ask's own `repo`, `pr` and `headSha`, if a JavaScript caller put them there, go too: the review
-  // is of the pull request fetched below and nothing else.
-  const unbuilt = refuseUnbuilt(a.ask as Partial<ReviewRequest>)
+  // Decision 4, for every way in: what the deployment does not allow is dropped and named, never run
+  // in silence — today, a `multi` with `allowMulti: false` (spec 0.2.0 §14.19). Applied here, so the
+  // CLI and an SDK host refuse exactly what the App refuses. Whether a review is automatic is the
+  // caller's to know, not this function's — the App's runner refuses `multi` on an automatic review
+  // itself (§14.19), and must keep doing so when it moves onto this function (plan Stage 6). The ask's
+  // own `repo`, `pr` and `headSha`, if a JavaScript caller put them there, go too: the review is of
+  // the pull request fetched below and nothing else.
+  const unbuilt = refuseUnbuilt(a.ask as Partial<ReviewRequest>, { allowMulti: a.deployment.allowMulti })
   const { repo: _repo, pr: _pr, headSha: _headSha, ...ask } = unbuilt.request
   try {
     const pr = await fetchPullRequest({ octokit: a.octokit, owner: a.owner, repo: a.repo, number: a.number })

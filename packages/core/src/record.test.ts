@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { defaultDeploymentConfig, resolveSettings, type ReviewRequest } from './config'
 import type { EngineResult } from './engine'
+import { combineFocusRuns, type FocusRun } from './multi'
 import { REVIEW_INSTRUCTIONS_DIGEST, REVIEW_INSTRUCTIONS_VERSION } from './prompt'
 import { buildReviewRecord, ENGINE_VERSION, type ReviewRecord } from './record'
 
@@ -166,6 +167,35 @@ describe('buildReviewRecord — the check pass', () => {
     expect(r.usage.costUsd).toBe(0.9412)           // the review alone
     expect(r.checkUsage?.costUsd).toBe(0.1131)     // the pass alone
     expect(r.costUsd).toBeCloseTo(1.0543, 6)       // what the run cost, which is what a budget means
+  })
+})
+
+// Spec 0.2.0 §8.3 point 6: the record gains one entry per focus beside the combined `usage`, and stays
+// version 1 — the field is new, and nothing that was already here changed meaning.
+describe('buildReviewRecord — the focused reviewers of a multi-reviewer review', () => {
+  const focusUsage = (costUsd: number) => ({ ...RESULT.usage, costUsd })
+  const FOCUSES: FocusRun[] = [
+    { lens: 'intent', result: { ...RESULT, usage: focusUsage(0.71) } },
+    { lens: 'impact', result: { output: null, usage: focusUsage(0.4), cutShort: false, wrapUpFired: false, failure: { kind: 'refusal' } } },
+    { lens: 'security', result: { ...RESULT, usage: focusUsage(5.01), cutShort: true, failure: { kind: 'budget', spentUsd: 5.01 } } },
+  ]
+
+  it('keeps no focus for a review by one reviewer', () => {
+    expect(record().focuses).toEqual([])
+  })
+
+  it('records how each focus ended, and what it cost, beside the combined usage', () => {
+    const combined = combineFocusRuns(FOCUSES)
+    const r = record({ result: combined, focuses: FOCUSES, check: { verdicts: VERDICTS, usage: CHECK_USAGE } })
+    expect(r.recordVersion).toBe(1)
+    expect(r.focuses.map((f) => [f.lens, f.finished, f.cutShort, f.failure?.kind ?? null, f.findings, f.usage.costUsd])).toEqual([
+      ['intent', true, false, null, 1, 0.71],
+      ['impact', false, false, 'refusal', 0, 0.4],
+      ['security', true, true, 'budget', 1, 5.01],
+    ])
+    // `usage` is the reviewers together, so the cost a summary prints includes every focus.
+    expect(r.usage.costUsd).toBeCloseTo(6.12, 6)
+    expect(r.costUsd).toBeCloseTo(6.12 + CHECK_USAGE.costUsd, 6)
   })
 })
 

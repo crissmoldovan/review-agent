@@ -17,7 +17,7 @@ import {
 } from '@review-agent/github'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppIdentity } from '../credentials'
-import { HEAD_SHA_UNRESOLVED, MULTI_REFUSED, decodeRequestRefinement } from '../decide'
+import { HEAD_SHA_UNRESOLVED, MULTI_REFUSED, MULTI_REFUSED_AUTOMATIC, decodeRequestRefinement } from '../decide'
 import {
   REVIEW_TASK_ID, idempotencyKeyFor, tagsFor, type ReviewTaskPayload, type TriggerPort,
 } from '../dispatch'
@@ -516,14 +516,42 @@ describe('what the summary is told (Criss, decision 4)', () => {
     expect(vi.mocked(d.publishReview).mock.calls[0][0]).toMatchObject({ refused })
   })
 
-  it('refuses the fan-out a payload carries itself, reviews with one reviewer, and names it', async () => {
-    // A Re-run is refused in decideDelivery (Task 10), but a payload can be triggered by hand, as
-    // Task 15 Step 16 does. `--multi` stays refused until the multi-reviewer mode is built.
+  it('runs several reviewers when somebody with push access asked for them (spec 0.2.0 §8.3, §14.19)', async () => {
     const d = deps()
+    await reviewTaskRun({ ...PAYLOAD, request: { ...REQUEST, tier: 'thorough', multi: true } }, {}, d)
+    expect(d.hasPushAccess).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(d.runReview).mock.calls[0][0].ask).toMatchObject({ tier: 'thorough', multi: true })
+    expect(vi.mocked(d.publishReview).mock.calls[0][0].refused).toBeUndefined()
+    // A Re-run of this review repeats it: the check run carries the setting.
+    expect(decodeRequestRefinement(vi.mocked(d.createCheckRun).mock.calls[0][0].externalId)).toEqual({ tier: 'thorough', multi: true })
+  })
+
+  it('spends nothing on several reviewers for somebody who cannot push', async () => {
+    const d = deps({ hasPushAccess: vi.fn(async () => false) })
+    expect((await reviewTaskRun({ ...PAYLOAD, request: { ...REQUEST, multi: true } }, {}, d)).kind).toBe('refused')
+    expect(d.runReview).not.toHaveBeenCalled()
+  })
+
+  it('refuses several reviewers a deployment switched off, reviews with one, and names it (spec 0.2.0 §14.19)', async () => {
+    // decideDelivery refuses it first (Task 10), but a payload can be triggered by hand, as Task 15
+    // Step 16 does, and the deployment's switch is the runner's to hold too.
+    const d = deps({ deployment: vi.fn(() => ({ ...DEPLOYMENT, allowMulti: false })) })
     await reviewTaskRun({ ...PAYLOAD, request: { ...REQUEST, tier: 'thorough', multi: true } }, {}, d)
     const ask = vi.mocked(d.runReview).mock.calls[0][0].ask
     expect(ask.multi).toBeUndefined()
+    expect(ask.tier).toBe('thorough')
     expect(vi.mocked(d.publishReview).mock.calls[0][0].refused).toEqual([MULTI_REFUSED])
+  })
+
+  it('never runs several reviewers on an automatic review, however the payload asks (spec 0.2.0 §14.19)', async () => {
+    // No doorway puts `multi` on an automatic review; a payload built by hand can, and it would spend
+    // three reviews on nobody's say-so — past the push-access check, which only a request gets.
+    const d = deps()
+    const { requestId: _id, requestedBy: _by, ...automatic } = REQUEST
+    await reviewTaskRun({ ...PAYLOAD, request: { ...automatic, multi: true } }, {}, d)
+    expect(d.hasPushAccess).not.toHaveBeenCalled()
+    expect(vi.mocked(d.runReview).mock.calls[0][0].ask.multi).toBeUndefined()
+    expect(vi.mocked(d.publishReview).mock.calls[0][0].refused).toEqual([MULTI_REFUSED_AUTOMATIC])
   })
 
   it('honours a thorough tier a payload carries, because it is one reviewer at high effort (spec 0.2.0 §14.1)', async () => {

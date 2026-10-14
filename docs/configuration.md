@@ -6,7 +6,7 @@ Settings come from three places, and each is allowed to change different things:
 |---|---|---|---|
 | **Deployment settings** | whoever runs and pays for the reviewer | a `DeploymentConfig` object (below) | everything |
 | **The repository file** | the reviewed repository | `.review-agent/review.md`, read from the pull request's **base** branch | it can make the review **quieter or stricter**, never louder, costlier or less safe |
-| **The request** | the person asking | `/review` flags in a comment, or CLI flags | tier, model, effort, check pass, a brief, and a **lower** budget |
+| **The request** | the person asking | `/review` flags in a comment, or CLI flags | tier, model, effort, check pass, the [multi-reviewer mode](#the-multi-reviewer-mode), a brief, and a **lower** budget |
 
 The repository file is read from the **base** branch, never from the pull request itself, so a pull request cannot
 change the rules it is judged by.
@@ -19,13 +19,15 @@ returns the built-in defaults below. Where each kind of deployment gets its sett
 | Mode | Where the settings come from | How to change them |
 |---|---|---|
 | CLI | always `defaultDeploymentConfig()` | per-run flags only — see [the CLI](cli.md) |
-| App: the receiver | the object your receiver passes to `decideDelivery` | your receiver's code. **Only `command` and `autoReview` are read here** |
+| App: the receiver | the object your receiver passes to `decideDelivery` | your receiver's code. **Only `command`, `autoReview` and `allowMulti` are read here** |
 | App: the runner | `runnerDeployment()` in `packages/app/src/tasks/review-job.ts` | edit that function before you deploy the runner — see [deploying](deploying.md#4-optional-change-the-runners-settings) |
 | In-process (`runReviewJob`) | the `deployment` you pass | your code |
 
 In an App deployment the two halves are configured separately: the receiver decides **whether** a delivery is a
 review (`command`, `autoReview`); the runner decides **how** it is reviewed and reported (everything else). Keep the
-`command` in both the same if you change it, so the words in the summary match the word people type.
+`command` in both the same if you change it, so the words in the summary match the word people type. `allowMulti` is
+read by both — the receiver refuses a `--multi` before it starts a run, and the runner refuses one again whatever
+reaches it — so set it the same in both.
 
 ### Every setting
 
@@ -33,9 +35,10 @@ review (`command`, `autoReview`); the runner decides **how** it is reviewed and 
 |---|---|---|---|
 | `command` | string | `/review` | the word that asks for a review in a pull request comment. Matched at the start of the comment, case-insensitively, as a whole word: `/reviewer` is not `/review` |
 | `autoReview` | `'open+ready'` \| `'off'` | `'open+ready'` | review automatically when a pull request opens (not as a draft) and when it is marked ready for review. `'off'`: only when asked |
+| `allowMulti` | boolean | `true` | whether a request may ask for the [multi-reviewer mode](#the-multi-reviewer-mode) (`--multi`). `false`: a `--multi` is refused and named under **Not honoured**, and one reviewer runs. An automatic review never runs it either way |
 | `model` | string | `claude-opus-5` | the model, unless a request names another |
 | `effort` | `low` … `max` | `low` | the fallback effort; in practice each tier's own `effort` is used |
-| `tiers` | `{ basic, normal, thorough }` | see [tiers](#tiers) | per tier: `agents`, `effort`, `check`, `budgetUsd` |
+| `tiers` | `{ basic, normal, thorough }` | see [tiers](#tiers) | per tier: `effort`, `check`, `budgetUsd`, and `agents`, which nothing reads since 0.2.0 — several reviewers are asked for with `--multi`, never set by a tier |
 | `severity.bands` | `{ critical, high, medium }` | `{ critical: 9, high: 7, medium: 4 }` | where each band starts. Anything below `medium` is **low** |
 | `severity.postInlineAtOrAbove` | 1–10 | `5` | the lowest severity that may become an inline comment. Lower findings go in the summary |
 | `report.mode` | see [modes](#reporting-modes) | `inline+summary` | what is posted |
@@ -62,6 +65,9 @@ A tier is a named preset. A request picks one; the default is `basic`.
 All figures are at **per-token API prices** — what an Anthropic API key would be billed. With a subscription token the
 same amounts are drawn from the subscription's allowance instead.
 
+A tier says **how deep** one reviewer goes. How **many** reviewers look is the separate
+[multi-reviewer mode](#the-multi-reviewer-mode), which combines with any tier.
+
 ### Budgets
 
 - The **soft budget** is told to the model in its instructions. It is advisory.
@@ -71,8 +77,44 @@ same amounts are drawn from the subscription's allowance instead.
   that as their ceiling — $0.50 and $1.25 on `basic`. The re-review pass only runs if its ceiling still fits under
   the review's ceiling after what has been spent.
 - A request may **lower** the budget (`--budget 1`), never raise it.
+- A [multi-reviewer review](#the-multi-reviewer-mode) gives **each** focused reviewer the tier's soft budget and
+  ceiling, so its reviewers may spend up to three times the tier's ceiling between them — $15 on `basic`. Its one
+  check pass gets a quarter of the soft budget for each focus that reported a finding (up to $1.50, ceiling $3.75, on
+  `basic`), and its re-review pass must fit under the three ceilings together.
 
 Measured costs are in the [README](../README.md#what-it-costs).
+
+### The multi-reviewer mode
+
+Instead of one reviewer looking at everything, **three** run, each told to look for one kind of problem: `intent`
+(does the change do what it says, and correctly), `impact` (what else it breaks or silently changes) and `security`.
+Their findings are combined into one review. A request asks for it with `--multi`, with any tier:
+`/review --multi --tier normal` is three focused reviewers, each at `normal`'s `medium` effort.
+
+**When to use it.** A change that is both risky and wide — it touches several areas, or is the kind where one reviewer
+tends to spend its whole budget on one sort of problem. Not by default: it costs roughly three reviews, plus the check
+pass. Its cost is **not measured yet** on this release. The one trial before it — three focused `claude-opus-5`
+reviewers and a check pass, at per-token API prices, measured on 2026-09-12 — went like this: on one pull request two
+reviewers finished and found 7 findings for $2.84, and $2.10 was lost on the third; on another all three were stopped
+by the ceiling and returned nothing, $5.91. This mode is built so that a stopped reviewer's work counts and one
+failure does not sink the rest.
+
+**How it runs.**
+
+1. One Claude Code process per focus, with the same read-only rules, the same checkout and its **own** soft budget
+   and ceiling — the tier's. A reviewer stopped by its ceiling keeps what it had written.
+2. A reviewer that fails does not fail the review. The review fails only when none of the three produced anything.
+   The summary says which ran, which were cut short and which did not finish.
+3. The findings of all three go through **one** [check pass](how-it-works.md#the-check-pass), which also marks a
+   finding that repeats an earlier one — the same defect, however it is worded. A duplicate is not posted, like a
+   refuted finding, and stays on the record. With the check pass off (`--skip-check`), nothing is merged, and the
+   summary says the same problem may be listed twice.
+4. Side by side, three at a time, in the CLI and the library (`defaultRunReviewDeps({ concurrency })` changes it). The
+   App's runner runs them **one at a time**: three Claude processes do not fit its machine.
+
+**Who may ask.** It runs only when somebody asks — a `/review --multi` comment, or the **Re-run** button on a review
+that ran it — and, in the App, only for someone with push access, like every requested review. An automatic review
+never runs it. `allowMulti: false` switches it off for a deployment. The CLI has no `--multi` flag yet.
 
 ### Reporting modes
 
@@ -173,7 +215,7 @@ Please look hard at the migration: it runs on a table with 40M rows.
 | `--model` | any name | the model |
 | `--budget` | dollars | a **lower** soft budget; a higher one is ignored and named in the summary |
 | `--check` / `--skip-check` | — | turn the check pass on or off; if both appear, the last wins |
-| `--multi` | — | refused and named in the summary: the multi-reviewer mode is not built yet |
+| `--multi` | — | three [focused reviewers](#the-multi-reviewer-mode) instead of one, at the chosen tier. Refused and named in the summary when the deployment sets `allowMulti: false` |
 
 `--flag=value` works too. Every word on the first line that is not a flag, and every line after it, becomes the
 **brief**: a note to the reviewer, fenced off as data in its prompt. An invalid value is not used, and the summary
@@ -184,6 +226,7 @@ says which one and why — a refusal is never silent. Full detail: [using it on 
 | Setting | Decided by |
 |---|---|
 | tier, model, effort, check pass | the request, else the tier, else the deployment |
+| the multi-reviewer mode | the request only, when the deployment allows it (`allowMulti`); never on an automatic review |
 | budget | the tier, or a **lower** value from the request |
 | reporting mode | the deployment, or a **quieter** mode from the repository file |
 | inline threshold | the **higher** of the deployment's and the repository file's |

@@ -11,6 +11,9 @@ export {
   type EngineFailure, type EngineInput, type EngineResult, type Usage,
 } from './engine'
 export * from './findings'
+// The multi-reviewer mode's shared half (spec 0.2.0 §8.3): run the focuses, combine their answers,
+// record each one.
+export * from './multi'
 export * from './prompt'
 export * from './recheck-pass'
 export * from './record'

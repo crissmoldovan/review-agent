@@ -44,6 +44,12 @@ describe('the collaborators the deployed task actually uses', () => {
     }
   })
 
+  // Spec 0.2.0 §8.3 point 4: one review peaks around 400 MiB, and three Claude processes side by side
+  // do not fit the runner's 1 GB machine. One focus at a time until each runs as a child task (Stage 6).
+  it('runs the focused reviewers of a multi-reviewer review one at a time', () => {
+    expect(liveRunReviewDeps({ note: () => undefined }).concurrency).toBe(1)
+  })
+
   // Spec 0.2.0 §9.3 P13. One `review-agent-skills` for every account on a machine let any of them plant
   // an entry under the name this runner looks up; the directory is now this user's own.
   it.skipIf(process.platform === 'win32')('caches skills in a directory of this user’s own under the temp directory', () => {

@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import {
-  defaultSkillCacheDir, materialiseSkills, runCheckPass, runEngine, runRecheckPass,
+  DEFAULT_FOCUS_CONCURRENCY, defaultSkillCacheDir, materialiseSkills, runCheckPass, runEngine, runRecheckPass,
 } from '@review-agent/core'
 import { downloadArchive } from './archive'
 import { fetchPullRequest } from './pr'
@@ -19,19 +19,28 @@ import type { RunReviewDeps } from './run-review'
  *    review's tree would be the reviewed code reviewing itself.
  *  - `skillCacheDir`: where skills are cached; this OS's own cache directory when left out (spec
  *    0.2.0 §9.3 P13).
+ *  - `concurrency`: how many focused reviewers of a multi-reviewer review run at once (spec 0.2.0
+ *    §8.3 point 4). 3 when left out — every focus side by side, which is what a laptop, CI or a VPS
+ *    can take. A host short of memory says less: each is a Claude process of its own, and one review
+ *    peaks around 400 MiB.
  *
  *  Both directories must be absolute. A relative one is a programmer's error, refused here rather
- *  than resolved against whatever directory the process happened to start in. */
+ *  than resolved against whatever directory the process happened to start in. So is a concurrency
+ *  that is not a whole number of at least 1. */
 export const defaultRunReviewDeps = (a: {
   note: (s: string) => void
   workDir?: string
   skillCacheDir?: string
+  concurrency?: number
 }): RunReviewDeps => {
   if (a.workDir !== undefined && !isAbsolute(a.workDir)) {
     throw new TypeError(`workDir must be an absolute path: ${a.workDir}`)
   }
   if (a.skillCacheDir !== undefined && !isAbsolute(a.skillCacheDir)) {
     throw new TypeError(`skillCacheDir must be an absolute path: ${a.skillCacheDir}`)
+  }
+  if (a.concurrency !== undefined && (!Number.isInteger(a.concurrency) || a.concurrency < 1)) {
+    throw new TypeError(`concurrency must be a whole number of at least 1, got ${String(a.concurrency)}`)
   }
   const workDir = a.workDir
   const skillCacheDir = a.skillCacheDir
@@ -43,5 +52,6 @@ export const defaultRunReviewDeps = (a: {
     skillCacheDir: () => skillCacheDir ?? defaultSkillCacheDir(),
     now: () => new Date(),
     note: a.note,
+    concurrency: a.concurrency ?? DEFAULT_FOCUS_CONCURRENCY,
   }
 }

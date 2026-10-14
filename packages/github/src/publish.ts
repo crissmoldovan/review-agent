@@ -14,7 +14,7 @@ import {
   commentKey, findSummaryComment, postReview, reinstateInlineComment, retractInlineComment,
   upsertSummaryComment, type FoundSummary, type InlineComment, type SummaryCommentResult,
 } from './post'
-import { selectForPosting } from './report'
+import { duplicatesIn, selectForPosting } from './report'
 import type { RunReviewResult } from './run-review'
 import { fetchThreadReplies } from './threads'
 
@@ -25,7 +25,8 @@ export type PublishCounts = {
   summaryOnly: number
   /** Inline comments GitHub refused (Task 4), which were said in the summary instead. */
   droppedInline: number
-  /** Refuted by the check pass, or past the low-band cap: recorded, said nowhere. */
+  /** Refuted by the check pass, marked by it as a duplicate of another finding (a multi-reviewer
+   *  review, spec 0.2.0 §8.3), or past the low-band cap: recorded, said nowhere. */
   suppressed: number
   /** Findings whose path is not a file in the checkout (design §4.3): said nowhere. */
   notInCheckout: number
@@ -92,9 +93,17 @@ const whyItStopped = (f: EngineFailure | null): string => {
 
 /** The prose of a summary whose review did not complete. Partial findings are kept (Global
  *  Constraints) and listed in the summary, never placed on a line: a partial review spread across
- *  the diff would read as a complete one. */
+ *  the diff would read as a complete one.
+ *
+ *  A multi-reviewer review gets here only when no focus produced anything (spec 0.2.0 §8.3 point 2),
+ *  and its `failure` is then the first focus's alone, so the sentence is about all of them; the line
+ *  under the automated-review line names how each one ended. */
 const unfinishedSummary = (r: RunReviewResult): string => {
-  const stopped = `**This review did not complete:** ${whyItStopped(r.result.failure)}. Nothing was placed on a line.`
+  const focuses = r.record.focuses.length
+  const why = focuses > 0
+    ? `none of its ${focuses} focused reviewers returned an answer`
+    : whyItStopped(r.result.failure)
+  const stopped = `**This review did not complete:** ${why}. Nothing was placed on a line.`
   return r.result.output === null
     ? stopped
     : `${stopped} What it had found by then is listed below.\n\n${r.result.output.summary}`
@@ -218,8 +227,16 @@ export async function publishReview(a: {
       ? review.recheck.judgements
       : []
 
-  // 3. Every model-written path checked against the checkout before it is used (design §4.3).
-  const anchored = anchorFindings({ findings, pr, checkoutDir: review.checkoutDir })
+  // 3. Every model-written path checked against the checkout before it is used (design §4.3) — and,
+  //    first, the findings the check pass marked as repeating an earlier one taken out (a
+  //    multi-reviewer review, spec 0.2.0 §8.3, decision §14.17), so the same defect found by two
+  //    focuses is said once. By POSITION in the array the pass was given, which is what its
+  //    `duplicate_of` addresses, before anchoring reorders anything. Like a refuted finding, a
+  //    duplicate stays on the record — `output.findings` and `checkVerdicts` — and is said nowhere.
+  const duplicates = duplicatesIn(review.check === null ? null : { findings, verdicts: review.check.verdicts })
+  const anchored = anchorFindings({
+    findings: findings.filter((_, i) => !duplicates.has(i)), pr, checkoutDir: review.checkoutDir,
+  })
 
   // 4. What is said, and where (design §3.1, §5). The verdicts go in with the SAME array
   //    runCheckPass was given, because CheckVerdict.index addresses it. Design §4.6: a refuted
@@ -293,8 +310,17 @@ export async function publishReview(a: {
     ),
     ...(a.refused ?? []),
   ]
+  // A multi-reviewer review's line under the automated one: which focuses ran and how each ended
+  // (spec 0.2.0 §8.3 point 2), and — when there was something to merge and no check pass to merge it
+  // — that the same defect may be said twice.
+  const focuses = record.focuses.map((f) => ({ lens: f.lens, finished: f.finished, cutShort: f.cutShort }))
+  const unmerged = focuses.length > 0 && findings.length > 1 && (review.check?.verdicts.length ?? 0) === 0
   const summaryText = summaryBody({
     headSha, ...automated,
+    ...(focuses.length > 0 && {
+      focuses,
+      duplicates: !unmerged ? 'merged' as const : review.check === null ? 'check-off' as const : 'check-unanswered' as const,
+    }),
     summary: review.result.failure === null && output !== null ? output.summary : unfinishedSummary(review),
     intent: output?.intent ?? NO_INTENT,
     summaryOnly: said.summaryOnly, inconclusive: output?.inconclusive ?? [], marker,
@@ -404,7 +430,7 @@ export async function publishReview(a: {
       inline: posted === null ? 0 : said.inline.length,
       summaryOnly: summary === null ? 0 : said.summaryOnly.length,
       droppedInline: posted?.droppedInline.length ?? 0,
-      suppressed: plan.suppressed.length,
+      suppressed: plan.suppressed.length + duplicates.size,
       notInCheckout: anchored.dropped.length,
       retracted,
       reinstated,

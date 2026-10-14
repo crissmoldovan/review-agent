@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { Lens } from './prompt'
 
 export type Severity = number
 export type Category = 'intent' | 'correctness' | 'impact' | 'security'
@@ -12,6 +13,10 @@ export type Finding = {
   explanation: string
   evidence: string[]
   suggestion: string | null
+  /** The focused reviewer that reported it, on a multi-reviewer review (spec 0.2.0 §8.3); absent on a
+   *  review by one reviewer. Set by `combineFocusRuns` from which run it came out of, never read off
+   *  the model's answer — `parseReviewOutput` drops any such key — so a model cannot claim a focus. */
+  lens?: Lens
 }
 export type Inconclusive = { question: string; whatWouldSettleIt: string }
 export type IntentVerdict = 'matches' | 'partial' | 'diverges' | 'unclear'

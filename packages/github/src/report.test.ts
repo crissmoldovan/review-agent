@@ -5,7 +5,7 @@ import {
 } from '@review-agent/core'
 import type { CheckVerdict } from '@review-agent/core'
 import type { AnchorResult } from './anchor'
-import { selectForPosting } from './report'
+import { duplicatesIn, selectForPosting } from './report'
 
 // Settings are resolved, never hand-built: these tests are about what a deployment configures, so
 // they must read the same values resolveSettings hands the rest of the product.
@@ -285,5 +285,39 @@ describe('selectForPosting: the check pass decides', () => {
     })
     expect(plan.inline).toEqual([])
     expect(plan.suppressed).toHaveLength(2)
+  })
+})
+
+// Spec 0.2.0 §8.3, decision §14.17: the check pass of a multi-reviewer review marks a finding that
+// repeats an earlier one, and that finding is not said.
+describe('duplicatesIn', () => {
+  const v = (index: number, duplicateOf?: number | null): CheckVerdict => ({
+    index, verdict: 'confirmed', severity: 6, reason: 'r', evidence: [],
+    ...(duplicateOf !== undefined && { duplicateOf }),
+  })
+
+  it('names, by position, each finding the check pass said repeats an earlier one', () => {
+    const findings = [finding({ title: 'a' }), finding({ title: 'b' }), finding({ title: 'a, again' }), finding({ title: 'b, again' })]
+    expect([...duplicatesIn({ findings, verdicts: [v(0, null), v(1, null), v(2, 0), v(3, 1)] })]).toEqual([2, 3])
+  })
+
+  // The case `verdictsById` cannot tell apart: two findings with one id. Position can.
+  it('drops the second of two identical findings and keeps the first', () => {
+    const same = finding()
+    expect([...duplicatesIn({ findings: [same, { ...same }], verdicts: [v(0, null), v(1, 0)] })]).toEqual([1])
+  })
+
+  it('trusts no pointer that is not to an earlier finding, so a pair can never silence each other', () => {
+    const findings = [finding(), finding(), finding()]
+    // Each other, itself, a later one, out of range, negative, a fraction.
+    const verdicts = [v(0, 1), v(1, 1), v(2, 2), { ...v(1), duplicateOf: 7 }, { ...v(2), duplicateOf: -1 }, { ...v(2), duplicateOf: 0.5 }]
+    expect([...duplicatesIn({ findings, verdicts })]).toEqual([])
+    // A verdict about a finding that is not in the list names nothing either.
+    expect([...duplicatesIn({ findings, verdicts: [v(5, 0)] })]).toEqual([])
+  })
+
+  it('names nothing when no check pass ran, or when it was not asked', () => {
+    expect(duplicatesIn(null).size).toBe(0)
+    expect(duplicatesIn({ findings: [finding(), finding()], verdicts: [v(0), v(1)] }).size).toBe(0)
   })
 })

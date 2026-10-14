@@ -140,19 +140,20 @@ const fakeGitHub = (seed: {
 const only = (calls: Call[], route: string): Call[] => calls.filter((c) => c.route === route)
 const writes = (calls: Call[]): string[] => calls.map((c) => c.route).filter((r) => !r.startsWith('GET '))
 
-const deploymentIn = (mode: ReportMode = 'inline+summary'): DeploymentConfig => {
+const deploymentIn = (mode: ReportMode = 'inline+summary', allowMulti = true): DeploymentConfig => {
   const d = defaultDeploymentConfig()
   d.report.mode = mode
+  d.allowMulti = allowMulti
   return d
 }
 
 /** What a caller gets from prepareReview, with GitHub's two reads answered in place. */
 const prepare = async (a: {
-  octokit: Octokit; mode?: ReportMode; ask?: ReviewAsk; repoConfig?: RepoConfig | null
+  octokit: Octokit; mode?: ReportMode; ask?: ReviewAsk; repoConfig?: RepoConfig | null; allowMulti?: boolean
 }): Promise<PreparedReview> => {
   const p = await prepareReview({
     octokit: a.octokit, owner: 'acme', repo: 'widgets', number: 16,
-    deployment: deploymentIn(a.mode), ask: a.ask ?? {},
+    deployment: deploymentIn(a.mode, a.allowMulti), ask: a.ask ?? {},
     deps: { fetchPullRequest: async () => PR, fetchRepoConfig: async () => a.repoConfig ?? null },
   })
   if (p.kind !== 'prepared') throw new Error(`expected a prepared review, got ${p.kind}`)
@@ -164,10 +165,13 @@ const session = async (a: {
   deps?: Partial<RunReviewDeps>; ask?: ReviewAsk; repoConfig?: RepoConfig | null
   findSummaryComment?: SessionDeps['findSummaryComment']
   extra?: Partial<Parameters<typeof runReviewSession>[0]>
+  allowMulti?: boolean
 }): Promise<{ result: SessionResult; deps: RunReviewDeps; logs: string[] }> => {
   const deps = runReviewDeps(a.deps)
   const logs: string[] = []
-  const prepared = await prepare({ octokit: a.gh.octokit, mode: a.mode, ask: a.ask, repoConfig: a.repoConfig })
+  const prepared = await prepare({
+    octokit: a.gh.octokit, mode: a.mode, ask: a.ask, repoConfig: a.repoConfig, allowMulti: a.allowMulti,
+  })
   const result = await runReviewSession({
     prepared, post: a.post ?? true, via: { kind: 'cli', login: 'alice' },
     ...(a.reporter !== undefined && { reporter: a.reporter }),
@@ -203,8 +207,16 @@ describe('prepareReview (spec 0.2.0 §3)', () => {
     expect(p.pr.headSha).toBe(HEAD_SHA)
   })
 
-  it('refuses what is not built, for every way in, and names it (Criss, decision 4)', async () => {
+  it('honours --multi with any tier, for every way in, now that the mode is built (spec 0.2.0 §8.3)', async () => {
     const p = await prepare({ octokit: {} as Octokit, ask: { multi: true, tier: 'thorough' } })
+    expect(p.ask).toEqual({ tier: 'thorough', multi: true })
+    expect(p.refused).toEqual([])
+    expect(p.settings.tier).toBe('thorough')
+    expect(p.settings.multi).toBe(true)
+  })
+
+  it('refuses --multi a deployment switched off, for every way in, and names it (spec 0.2.0 §14.19)', async () => {
+    const p = await prepare({ octokit: {} as Octokit, ask: { multi: true, tier: 'thorough' }, allowMulti: false })
     expect(p.ask).toEqual({ tier: 'thorough' })
     expect(p.refused).toEqual([MULTI_REFUSED])
     expect(p.settings.tier).toBe('thorough')
@@ -274,7 +286,9 @@ describe('runReviewSession: posting (spec 0.2.0 §3)', () => {
 
   it('names in the summary, once, what the caller and the preparation refused', async () => {
     const gh = fakeGitHub()
-    await session({ gh, reporter: checkRunReporter(), ask: { multi: true }, extra: { refused: [MULTI_REFUSED] } })
+    await session({
+      gh, reporter: checkRunReporter(), ask: { multi: true }, allowMulti: false, extra: { refused: [MULTI_REFUSED] },
+    })
     const body = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
     expect(body.split(MULTI_REFUSED)).toHaveLength(2)
   })
@@ -576,6 +590,81 @@ describe('runReviewSession: what it throws', () => {
     await expect(runReviewSession({ prepared, post: 'yes' as never, via: { kind: 'sdk' }, deps })).rejects.toThrow(TypeError)
     await expect(runReviewSession({ prepared: {} as never, post: true, via: { kind: 'sdk' }, deps })).rejects.toThrow(TypeError)
     await expect(runReviewSession({ prepared, post: true, via: { kind: 'sdk' }, deadlineMs: 0, deps })).rejects.toThrow(TypeError)
+  })
+})
+
+/** An engine that answers as the focus it was started for: the lens is in the system prompt, the one
+ *  thing `runFocusedReviews` changes per focus. A focus with no entry here gets `fallback`. */
+const byFocus = (answers: Partial<Record<'intent' | 'impact' | 'security', EngineResult>>, fallback: EngineResult = RESULT) =>
+  vi.fn(async (input: EngineInput): Promise<EngineResult> => {
+    const lens = (['intent', 'impact', 'security'] as const).find((l) => input.systemPrompt.includes(`Your focus: ${l}`))
+    return (lens === undefined ? undefined : answers[lens]) ?? fallback
+  })
+const NO_ANSWER = (failure: EngineResult['failure'], costUsd = 0): EngineResult => ({
+  output: null, usage: { ...NOTHING, costUsd }, cutShort: failure?.kind === 'budget', wrapUpFired: false, failure,
+})
+
+describe('runReviewSession: the multi-reviewer mode (spec 0.2.0 §8.3)', () => {
+  it('publishes one review from three focused reviewers, names how each ended, and marks each line with its focus', async () => {
+    const gh = fakeGitHub()
+    const quiet: EngineResult = { ...RESULT, output: { ...OUTPUT, findings: [] } }
+    const runEngine = byFocus({ impact: quiet, security: NO_ANSWER({ kind: 'budget', spentUsd: 5.01 }, 5.01) })
+    const { result } = await session({ gh, reporter: checkRunReporter(), ask: { multi: true }, deps: { runEngine } })
+
+    const r = expectKind(result, 'reviewed')
+    expect(runEngine).toHaveBeenCalledTimes(3)
+    expect(r.record.settings.multi).toBe(true)
+    expect(r.record.focuses.map((f) => [f.lens, f.finished, f.cutShort])).toEqual([
+      ['intent', true, false], ['impact', true, false], ['security', false, true],
+    ])
+    // Every focus is paid for, the one that answered nothing included.
+    expect(r.record.costUsd).toBeCloseTo(USAGE.costUsd * 2 + 5.01 + CHECK_USAGE.costUsd, 6)
+    const summary = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
+    expect(summary).toContain('Three focused reviewers: intent ✓ · impact ✓ · security ✗ (did not finish)')
+    const comments = only(gh.calls, REVIEW_CREATE)[0].params.comments as { body: string }[]
+    expect(comments).toHaveLength(1)
+    expect(comments[0].body).toContain('**Severity 6/10** · security · intent focus')
+  })
+
+  // §8.3 point 2: the review fails only when every focus produced nothing — and then says so about
+  // each of them, not about the first one's ceiling.
+  it('is unfinished only when no focus answered, and names how each one ended', async () => {
+    const gh = fakeGitHub()
+    const runEngine = byFocus({
+      intent: NO_ANSWER({ kind: 'budget', spentUsd: 5.02 }, 5.02),
+      impact: NO_ANSWER({ kind: 'refusal' }, 0.4),
+      security: NO_ANSWER({ kind: 'crashed', code: 1, stderr: '' }),
+    })
+    const { result } = await session({ gh, reporter: checkRunReporter(), ask: { multi: true }, deps: { runEngine } })
+    const u = expectKind(result, 'unfinished')
+    expect(u.reason).toBe(
+      'none of the 3 focused reviewers produced a review — intent: the review stopped at its $5.00 ceiling after $5.02; ' +
+      'impact: the model answered in prose instead of the review schema; security: the reviewer process crashed (exit 1)',
+    )
+    expect(u.retryable).toBe(false)
+    const summary = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
+    expect(summary).toContain('**This review did not complete:** none of its 3 focused reviewers returned an answer.')
+    expect(summary).toContain('Three focused reviewers: intent ✗ (did not finish) · impact ✗ (did not finish) · security ✗ (did not finish)')
+  })
+
+  it('stops every focus when the review is stopped, and starts none it had not started', async () => {
+    const stop = new AbortController()
+    const gh = fakeGitHub()
+    const seen: EngineInput[] = []
+    const runEngine = vi.fn((input: EngineInput) => new Promise<EngineResult>((_resolve, reject) => {
+      seen.push(input)
+      input.signal?.addEventListener('abort', () => { reject(new Error('aborted')) })
+      // Once both are running: what a person pressing Ctrl-C mid-review looks like.
+      if (seen.length === 2) setTimeout(() => { stop.abort() }, 0)
+    }))
+    const { result } = await session({
+      gh, reporter: checkRunReporter(), ask: { multi: true }, deps: { runEngine, concurrency: 2 },
+      extra: { signal: stop.signal },
+    })
+    expect(expectKind(result, 'failed')).toMatchObject({ stage: 'model', stopped: 'cancelled', retryable: false })
+    // Two ran side by side and both got the stop; the third was never started.
+    expect(seen).toHaveLength(2)
+    expect(seen.every((i) => i.signal?.aborted === true)).toBe(true)
   })
 })
 

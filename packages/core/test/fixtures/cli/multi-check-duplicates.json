@@ -1,0 +1,72 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "terminal_reason": "completed",
+  "is_error": false,
+  "num_turns": 9,
+  "duration_ms": 96400,
+  "total_cost_usd": 0.4410312,
+  "usage": {
+    "input_tokens": 9,
+    "output_tokens": 6120,
+    "cache_read_input_tokens": 120334,
+    "cache_creation_input_tokens": 30117
+  },
+  "structured_output": {
+    "verdicts": [
+      {
+        "index": 0,
+        "verdict": "confirmed",
+        "severity": 6,
+        "reason": "Line 24 calls setTimeout with no delay, so the computed delayMs is unused.",
+        "evidence": [
+          "src/retry.ts:22",
+          "src/retry.ts:24"
+        ],
+        "duplicate_of": null
+      },
+      {
+        "index": 1,
+        "verdict": "uncertain",
+        "severity": 3,
+        "reason": "The description mentions jitter; whether it was meant for this change cannot be settled from the code.",
+        "evidence": [
+          "src/retry.ts:13-27"
+        ],
+        "duplicate_of": null
+      },
+      {
+        "index": 2,
+        "verdict": "confirmed",
+        "severity": 5,
+        "reason": "submit.ts still checks for HttpError, which withRetry now wraps.",
+        "evidence": [
+          "src/client.ts:88",
+          "src/orders/submit.ts:41"
+        ],
+        "duplicate_of": null
+      },
+      {
+        "index": 3,
+        "verdict": "confirmed",
+        "severity": 6,
+        "reason": "The same defect as finding 0: setTimeout is called without the delay.",
+        "evidence": [
+          "src/retry.ts:24"
+        ],
+        "duplicate_of": 0
+      },
+      {
+        "index": 4,
+        "verdict": "confirmed",
+        "severity": 8,
+        "reason": "The headers logged at :40 include the Authorization header set at :17.",
+        "evidence": [
+          "src/client.ts:17",
+          "src/client.ts:40"
+        ],
+        "duplicate_of": null
+      }
+    ]
+  }
+}

@@ -274,6 +274,30 @@ describe('runRecheckPass', () => {
     expect(3.75 + 1.25).toBeLessThanOrEqual(5)
   })
 
+  // Spec 0.2.0 §8.3: a multi-reviewer review gives each focus the tier's ceiling, so its whole ceiling
+  // is the focuses times that. Three basic focuses spending $3 between them leave room under $15, and
+  // none under one focus's $5 — which is what the guard measured against before it was told.
+  it('measures a multi-reviewer review against its whole ceiling, one tier ceiling per focus', async () => {
+    const budget = { targetUsd: 2, wrapUpAtUsd: 1.4, ceilingUsd: 5 }
+    const asOneReviewer = await runRecheckPass({
+      previous: THREE, spentUsd: 4.5, input: inputFixture({ settings: settingsFixture({ budget }) }),
+    })
+    expect(asOneReviewer.skipped).toBe('budget')
+
+    const ran = await runRecheckPass({
+      previous: THREE, spentUsd: 4.5, ceilingUsd: 15, input: inputFixture({ settings: settingsFixture({ budget }) }),
+    })
+    expect(ran.ran).toBe(true)
+    // Its own allowance does not grow with the focuses: it asks about the earlier findings, once.
+    const seen = JSON.parse(readFileSync(record, 'utf8'))
+    expect(seen.argv[seen.argv.indexOf('--max-budget-usd') + 1]).toBe('1.25')
+
+    const refused = await runRecheckPass({
+      previous: THREE, spentUsd: 14, ceilingUsd: 15, input: inputFixture({ settings: settingsFixture({ budget }) }),
+    })
+    expect(refused.skipped).toBe('budget')
+  })
+
   // ── The rows are somebody else's text ───────────────────────────────────────────────────────────
 
   it('clips a hand-edited row and caps how many rows it will ask about', async () => {

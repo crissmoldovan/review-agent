@@ -79,7 +79,7 @@ describe('dispatchReview', () => {
   it('carries the comment doorway refusals through to the runner', async () => {
     // Criss, 2026-09-14 (decision 4): the dispatch is the only road from the receiver to the
     // summary, so a refusal dropped here is a refusal nobody ever hears about.
-    const refused = ['`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.']
+    const refused = ['`--multi` — this deployment does not run several reviewers on one review, so one reviewer ran.']
     const trigger = port()
 
     await dispatchReview({ request: requested, installationId: 4242, refused, trigger })
@@ -175,7 +175,7 @@ describe('what the runner is sent', () => {
   it('carries the comment doorway refusals, and only when there are some', () => {
     // Criss, 2026-09-14 (decision 4): what a comment asked for and did not get has to reach the
     // summary, and this payload is the only road from the receiver to the runner.
-    const refused = ['`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.']
+    const refused = ['`--multi` — this deployment does not run several reviewers on one review, so one reviewer ran.']
     expect(projectPayload({ request: automatic, installationId: 4242, refused }).refused).toEqual(refused)
     expect(Object.keys(projectPayload({ request: automatic, installationId: 4242, refused: [] })))
       .toEqual(['request', 'installationId'])

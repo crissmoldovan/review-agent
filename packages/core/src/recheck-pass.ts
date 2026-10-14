@@ -258,6 +258,12 @@ export const runRecheckPass = async (a: {
   /** What this review has already spent — the engine plus the check pass. The one cumulative money
    *  question this product asks; see the guard below. */
   spentUsd: number
+  /** The most the whole review may spend, which the guard below keeps engine + check + recheck under.
+   *  Left out, the tier's ceiling (`input.settings.budget.ceilingUsd`): a review by one reviewer. A
+   *  multi-reviewer review passes its focuses times that ceiling, because each focus has the tier's
+   *  own (spec 0.2.0 §8.3) — measured against one focus's ceiling, three focuses' spend would refuse
+   *  this pass on every re-review. */
+  ceilingUsd?: number
 }): Promise<RecheckPassResult> => {
   if (a.previous.length === 0) return nothing('nothing-to-ask')
 
@@ -280,7 +286,9 @@ export const runRecheckPass = async (a: {
   // Now the arithmetic closes: if this passes, engine + check + recheck cannot exceed
   // `settings.budget.ceilingUsd`, which is the only limit this product ever states for one review.
   // A refusal costs nothing and loses nothing except the refinement: every outcome stays `open`.
-  if (a.input.settings.budget.ceilingUsd - a.spentUsd < budget.ceilingUsd) return nothing('budget')
+  // A multi-reviewer review states N times that limit, one per focus, and passes it as `ceilingUsd`.
+  const reviewCeilingUsd = a.ceilingUsd ?? a.input.settings.budget.ceilingUsd
+  if (reviewCeilingUsd - a.spentUsd < budget.ceilingUsd) return nothing('budget')
 
   const input: EngineInput = {
     ...a.input,

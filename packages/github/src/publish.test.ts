@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Octokit } from '@octokit/core'
 import {
-  buildReviewRecord, defaultDeploymentConfig, resolveSettings,
-  type CheckVerdict, type EngineFailure, type EngineResult, type Finding, type RecheckSkipped,
+  buildReviewRecord, combineFocusRuns, defaultDeploymentConfig, resolveSettings,
+  type CheckVerdict, type EngineFailure, type EngineResult, type Finding, type FocusRun, type RecheckSkipped,
   type RecheckState, type ReportMode, type ReviewOutput, type ReviewRequest, type Usage,
 } from '@review-agent/core'
 import { describe, expect, it } from 'vitest'
@@ -468,6 +468,84 @@ describe('publishReview: the check pass decides what is said (design §4.6)', ()
   })
 })
 
+/** A multi-reviewer review, built the way runReview builds one (spec 0.2.0 §8.3): one engine result
+ *  per focus, combined, and a record that keeps each. */
+const multiReviewed = (a: { runs: FocusRun[]; verdicts?: CheckVerdict[] }): RunReviewResult => {
+  const request: ReviewRequest = { ...REQUEST, multi: true }
+  const settings = resolveSettings({ deployment: defaultDeploymentConfig(), repo: null, request })
+  const result = combineFocusRuns(a.runs)
+  const check = a.verdicts === undefined ? null : { verdicts: a.verdicts, usage: CHECK_USAGE }
+  const record = buildReviewRecord({
+    request, settings, result, skills: [], check, recheck: null, focuses: a.runs, removedFromCheckout: [],
+    startedAt: new Date('2026-09-14T10:00:00.000Z'), finishedAt: new Date('2026-09-14T10:04:39.000Z'),
+  })
+  return { pr: PR, request, settings, result, check, recheck: null, skills: [], checkoutDir: CHECKOUT, removedFromCheckout: [], record }
+}
+const focus = (lens: FocusRun['lens'], findings: Finding[] | null, failure: EngineFailure | null = null): FocusRun => ({
+  lens, result: { output: findings === null ? null : output(findings), usage: USAGE, cutShort: failure?.kind === 'budget', wrapUpFired: false, failure },
+})
+// INLINE again, in the impact focus's words: the same defect on the same line.
+const INLINE_AGAIN = finding({ category: 'correctness', title: 'any branch can publish by pushing a tag' })
+const verdict = (index: number, duplicateOf: number | null = null): CheckVerdict => ({
+  index, verdict: 'confirmed', severity: 6, reason: 'Reproduced from the workflow file.', evidence: [], duplicateOf,
+})
+
+describe('publishReview: a multi-reviewer review (spec 0.2.0 §8.3)', () => {
+  // Decision §14.17: one check pass over the union, which marks duplicates, so the same problem found
+  // by two focuses is said once — and, like a refuted finding, stays on the record.
+  it('says the same problem once when the check pass marks it a duplicate, and keeps both on the record', async () => {
+    const gh = fakeGitHub()
+    const review = multiReviewed({
+      runs: [focus('intent', [INLINE]), focus('impact', [INLINE_AGAIN, ELSEWHERE]), focus('security', [])],
+      verdicts: [verdict(0), verdict(1, 0), verdict(2)],
+    })
+    const out = await publish(gh.octokit, review)
+
+    const comments = only(gh.calls, REVIEW_CREATE)[0].params.comments as { body: string }[]
+    expect(comments).toHaveLength(1)
+    expect(comments[0].body).toContain(INLINE.title)
+    expect(comments[0].body.split('\n')[0]).toBe('**Severity 6/10** · security · intent focus')
+    const summary = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
+    expect(summary).toContain(ELSEWHERE.title)
+    expect(summary).not.toContain(INLINE_AGAIN.title)
+    expect(out.findings.map((f) => f.title)).toEqual([INLINE.title, ELSEWHERE.title])
+    expect(out.counts.suppressed).toBe(1)
+    // Said nowhere, so a later review does not ask about it either.
+    expect(out.marker.runs[0].findings.map((f) => f.title)).not.toContain(INLINE_AGAIN.title)
+    // And on the record, both of them, with the verdict that set one aside.
+    expect(review.record.output?.findings.map((f) => f.title)).toEqual([INLINE.title, INLINE_AGAIN.title, ELSEWHERE.title])
+    expect(review.record.checkVerdicts?.[1]?.duplicateOf).toBe(0)
+  })
+
+  it('says both when no check pass ran to merge them, and says why under the automated line', async () => {
+    const gh = fakeGitHub()
+    await publish(gh.octokit, multiReviewed({
+      runs: [focus('intent', [INLINE]), focus('impact', [INLINE_AGAIN]), focus('security', [])],
+    }))
+    expect(only(gh.calls, REVIEW_CREATE)[0].params.comments).toHaveLength(2)
+    expect(String(only(gh.calls, SUMMARY_CREATE)[0].params.body)).toContain(
+      'Three focused reviewers: intent ✓ · impact ✓ · security ✓ · the check pass was off, so findings were not merged and the same problem may be listed twice',
+    )
+  })
+
+  it('names each focus and how it ended, and places the findings of the ones that answered', async () => {
+    const gh = fakeGitHub()
+    const out = await publish(gh.octokit, multiReviewed({
+      runs: [
+        focus('intent', null, { kind: 'crashed', code: 1, stderr: '' }),
+        focus('impact', [INLINE], { kind: 'budget', spentUsd: 5.02 }),
+        focus('security', [ELSEWHERE]),
+      ],
+      verdicts: [verdict(0), verdict(1)],
+    }))
+    const summary = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
+    expect(summary.split('\n')[2]).toBe('Three focused reviewers: intent ✗ (did not finish) · impact ✓ (cut short) · security ✓')
+    // A focus stopped by its ceiling still counts (§8.3 point 1): its finding is placed like any other.
+    expect(out.completed).toBe(true)
+    expect(only(gh.calls, REVIEW_CREATE)[0].params.comments).toHaveLength(1)
+  })
+})
+
 describe('publishReview: a re-review', () => {
   // The last review said INLINE under comment 101 and GONE under comment 103, and a person
   // disputed INLINE in its thread.
@@ -928,11 +1006,11 @@ describe('publishReview: what the gate and the summary are handed (Criss, decisi
     const gh = fakeGitHub()
     await publishReview({
       octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(), via: APP,
-      refused: ['`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.'],
+      refused: ['`--multi` — this deployment does not run several reviewers on one review, so one reviewer ran.'],
     })
     const body = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
     expect(body).toContain('Not honoured')
-    expect(body).toContain('`--multi` — the multi-reviewer fan-out is not built yet')
+    expect(body).toContain('`--multi` — this deployment does not run several reviewers on one review')
   })
 
   // Spec 0.2.0 §9.3 P10: read off the record, so the summary says what the record says.

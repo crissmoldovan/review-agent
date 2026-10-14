@@ -86,9 +86,17 @@ export { octokitFor, pushAccessOf }
 
 /** The runner's collaborators for `runReview`: the shared defaults (`defaultRunReviewDeps`), with
  *  the runner's own skill cache. Checkouts go under the system temp directory, a new directory per
- *  review, as they always have. */
+ *  review, as they always have.
+ *
+ *  ONE focused reviewer at a time on a multi-reviewer review (spec 0.2.0 §8.3 point 4). One review
+ *  peaks around 400 MiB and the runner's trigger.dev machine has 1 GB, so three Claude processes side
+ *  by side do not fit. One at a time costs wall clock, not money, and stays well inside the 30-minute
+ *  deadline at every measured review length (55s to 4m40s each, design §8). Decision §14.18 replaces
+ *  this with a child task per focus (plan Stage 6). */
+export const RUNNER_FOCUS_CONCURRENCY = 1
+
 export const liveRunReviewDeps = (a: { note: (s: string) => void }): RunReviewDeps => ({
-  ...defaultRunReviewDeps({ note: a.note }),
+  ...defaultRunReviewDeps({ note: a.note, concurrency: RUNNER_FOCUS_CONCURRENCY }),
   // Per user (spec 0.2.0 §9.3 P13). The temp directory is shared, and one cache directory for every
   // account on the machine let any of them plant an entry under the name this runner would look up;
   // `materialiseSkills` now creates it 0700 and trusts only what this user owns. The uid, not the

@@ -66,6 +66,33 @@ released together, at the same version.
   too. `upsertSummaryComment`, `publishReview` and `createCheckRun` also hand back GitHub's link to what they wrote.
   `THOROUGH_REFUSED` is deprecated.
 
+### Stage 3 — the multi-reviewer mode
+
+- **`/review --multi` runs three focused reviewers** — `intent`, `impact` and `security` — instead of one, with any
+  tier: `--multi --tier normal` is three reviewers at `medium` effort. Each has the tier's soft budget and its own
+  ceiling (so up to three times the tier's ceiling between them), keeps what it wrote if its ceiling stops it, and
+  does not take the others down if it fails: the review is unfinished only when none of the three produced anything.
+  Its cost is not measured yet.
+- **One check pass over all their findings, which also merges duplicates.** It is asked which findings repeat an
+  earlier one; a duplicate is not posted, like a refuted finding, and stays on the record. Its budget is a quarter of
+  the tier's target for each reviewer that reported a finding. With the check pass off nothing is merged, and the
+  summary says so. A review by one reviewer is never asked about duplicates: its check pass is word for word what it
+  was, and `REVIEW_INSTRUCTIONS_VERSION` is `1.3.0` only because the product now ships that one new paragraph.
+- **The summary names the reviewers and how each ended** — *"Three focused reviewers: intent ✓ · impact ✓ (cut short)
+  · security ✗ (did not finish)"* — and each inline comment names the focus that found it.
+- **The record keeps each reviewer:** `focuses: [{ lens, usage, finished, cutShort, failure, findings }]`, empty for
+  one reviewer; `usage` and `costUsd` include all three; a finding carries its `lens` and a check verdict its
+  `duplicateOf`. The record stays version 1.
+- **Never automatic, and a deployment can switch it off.** Only a request runs it — a comment, or the Re-run button
+  of a review that used it, which in the App means someone with push access. A tier's `agents` no longer turns it on
+  (nothing reads it now), and an automatic review that carries `multi` is refused and named. New deployment setting
+  `allowMulti` (default `true`): `false` refuses `--multi` under *Not honoured* and runs one reviewer. `MULTI_REFUSED`
+  is now that sentence; `MULTI_REFUSED_AUTOMATIC` is new. `refuseUnbuilt` takes `{ allowMulti, automatic }`.
+- **How many run at once:** `defaultRunReviewDeps({ concurrency })`, 3 by default. The App's runner runs them one at
+  a time, because three Claude processes do not fit its 1 GB machine; a child task per reviewer comes later in 0.2.0.
+  The CLI has no `--multi` flag yet.
+- **A multi-reviewer re-review** fits its re-review pass under the three reviewers' ceilings together, not one.
+
 ## 0.1.3
 
 ### Fixed

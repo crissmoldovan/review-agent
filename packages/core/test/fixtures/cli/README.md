@@ -22,5 +22,13 @@ Do not "tidy" these files. The engine parses them as the CLI emits them, unknown
 | check-verdicts.json | success | completed | $0.6282085 | the check pass on 7 findings: 4 confirmed, 2 refuted, 1 uncertain, 8 turns |
 | failure-not-logged-in.json | success, **`is_error: true`** | api_error | $0 | the CLI run with no login in its environment, which never reaches the model. The first line of stdout only; with `--strict-mcp-config` absent the CLI also prints a log line, which the reviewer's flags suppress. Note `subtype` says success while `is_error` says otherwise — the field to trust is `is_error` |
 | recheck-judgements.json | success | completed | $0.0981234 | the re-review pass on 3 earlier findings: one `resolved`, one `still-present`, one `cannot-tell`, 4 turns. A minimal envelope, written by hand |
+| multi-intent.json | success | completed | $0.7134502 | the `intent` focus of a multi-reviewer review (spec 0.2.0 §8.3): 2 findings, 1 inconclusive. A minimal envelope, written by hand |
+| multi-impact.json | success | completed | $0.9021877 | the `impact` focus of the same review: 2 findings, the second the same defect as `multi-intent.json`'s first in other words, and the same inconclusive question. Minimal, by hand |
+| multi-security-budget-partial.json | error_max_budget_usd | budget_exhausted | $5.0123004 | the `security` focus of the same review, stopped by its ceiling with 1 finding written. Minimal, by hand; it says so in its own `_fixture_note` |
+| multi-check-duplicates.json | success | completed | $0.4410312 | the check pass over the union of those three (5 findings, in focus order), every verdict carrying `duplicate_of`: index 3 repeats index 0. Minimal, by hand |
 
 Costs are per-token API prices as the CLI reported them.
+
+The four `multi-*` files are written by hand, envelopes included: their costs, usage, turns and durations are
+invented, and no multi-reviewer run of this product produced them. They exist so the engine's handling of several
+focused reviewers — one cut short, one repeating another — can be tested without a model.

@@ -94,8 +94,10 @@ it is judged by.
 - A requested review — a `/review` comment or the **Re-run** button — first checks that the requester has **push
   access** to the repository. Without it, nothing runs and nothing is spent, and the refusal is a visible `neutral`
   check run rather than a comment, so nobody can make the bot write on a pull request by commenting.
-- A request may lower the budget, never raise it, and cannot ask for the multi-reviewer mode (`--multi`), which is
-  not built yet. It may pick `thorough`, one reviewer at `high` effort, at a cost the deployment's tier table sets.
+- A request may lower the budget, never raise it. It may pick `thorough`, one reviewer at `high` effort, at a cost
+  the deployment's tier table sets, and it may ask for the [multi-reviewer mode](configuration.md#the-multi-reviewer-mode)
+  (`--multi`), which costs roughly three reviews: that is honoured only for a request — never an automatic review —
+  and a deployment can refuse it with `allowMulti: false`.
 - The reviewer ignores comments from bots and comments carrying its own marker, so it cannot trigger itself.
 
 ## Reporting a vulnerability

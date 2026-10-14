@@ -1,0 +1,38 @@
+{
+  "type": "result",
+  "subtype": "error_max_budget_usd",
+  "terminal_reason": "budget_exhausted",
+  "is_error": true,
+  "num_turns": 21,
+  "duration_ms": 301877,
+  "total_cost_usd": 5.0123004,
+  "usage": {
+    "input_tokens": 30,
+    "output_tokens": 18877,
+    "cache_read_input_tokens": 611203,
+    "cache_creation_input_tokens": 70122
+  },
+  "structured_output": {
+    "summary": "The retry loop logs each failed attempt. Partway through reading the client's logging.",
+    "intent": {
+      "verdict": "unclear",
+      "note": "Stopped before judging the whole change."
+    },
+    "findings": [
+      {
+        "file": "src/client.ts",
+        "line": 40,
+        "severity": 8,
+        "category": "security",
+        "title": "The retry log line prints the request's Authorization header",
+        "explanation": "On each failed attempt the loop logs `request.headers` whole, and the client sets `Authorization: Bearer <token>` on every request, so the token lands in the application log.",
+        "evidence": [
+          "src/client.ts:40 — `log.warn('retrying', { headers: request.headers })`",
+          "src/client.ts:17 — `headers.Authorization = `Bearer ${token}``"
+        ]
+      }
+    ],
+    "inconclusive": []
+  },
+  "_fixture_note": "SYNTHETIC. A budget failure that still carries one finding: the security focus of a multi-reviewer review, stopped by its ceiling with partial output (spec 0.2.0 §8.3 point 1)."
+}

@@ -41,7 +41,11 @@ export const suggestionFits = (f: Finding): boolean => {
  *  renders a body with the fence emptied, so the degrade path above is exercised rather than
  *  asserted in prose (batch 1's verification, 2026-09-14, asked for a test that bites). */
 export const inlineBody = (f: Finding, fence: string = SUGGESTION_FENCE): string => {
-  const parts = [`**Severity ${f.severity}/10** · ${f.category}`, '', `**${f.title}**`, '', f.explanation]
+  // On a multi-reviewer review, which focused reviewer reported it (spec 0.2.0 §8.3): three words a
+  // reader can use to weigh it, after the two that decide whether they keep reading. The lens is one
+  // of `REVIEW_LENSES`, set by the engine and never by the model, so it is not text to escape.
+  const focus = f.lens === undefined ? '' : ` · ${f.lens} focus`
+  const parts = [`**Severity ${f.severity}/10** · ${f.category}${focus}`, '', `**${f.title}**`, '', f.explanation]
   // Backticked, because evidence is `path:line` and Markdown would otherwise eat an underscore in a
   // filename. An empty list prints no heading at all: a heading over nothing reads as a bug.
   if (f.evidence.length > 0) parts.push('', 'Evidence:', ...f.evidence.map((e) => `- \`${e}\``))
@@ -97,6 +101,34 @@ export const automatedReviewLine = (a: { via: ReviewVia; tier: Tier; model: stri
   `🤖 **Automated review** by [review-agent](${PRODUCT_URL}) · ${howItRan(a.via)} · tier **${a.tier}** · ` +
   `${inlineCode(a.model)} · $${a.costUsd.toFixed(2)} (model spend at per-token API prices)`
 
+/** How one focused reviewer of a multi-reviewer review ended, as its summary line says it (spec 0.2.0
+ *  §8.3 point 2). The record's `FocusRecord`, narrowed to what a reader is told. */
+export type FocusOutcome = { lens: string; finished: boolean; cutShort: boolean }
+
+/** Whether a multi-reviewer review's findings went through a check pass that could merge duplicates:
+ *  `check-off` — the tier or the request turned the pass off; `check-unanswered` — it ran and returned
+ *  no verdict. Either way the same defect, found by two focuses, may be said twice. */
+export type DuplicatesState = 'merged' | 'check-off' | 'check-unanswered'
+
+const NUMBER_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten']
+
+/** The line under the automated-review line on a multi-reviewer review: which focuses ran and how each
+ *  ended — `Three focused reviewers: intent ✓ · impact ✓ (cut short) · security ✗ (did not finish)` —
+ *  and, when nothing merged their duplicates, that. One line, because the automated-review line above
+ *  it is one: a reader takes both in before the review itself. */
+export const focusLine = (focuses: FocusOutcome[], duplicates: DuplicatesState = 'merged'): string => {
+  const count = NUMBER_WORDS[focuses.length] ?? String(focuses.length)
+  const each = focuses.map((f) => !f.finished
+    ? `${f.lens} ✗ (did not finish)`
+    : f.cutShort ? `${f.lens} ✓ (cut short)` : `${f.lens} ✓`)
+  const unmerged = duplicates === 'check-off'
+    ? ' · the check pass was off, so findings were not merged and the same problem may be listed twice'
+    : duplicates === 'check-unanswered'
+      ? ' · the check pass returned no verdicts, so findings were not merged and the same problem may be listed twice'
+      : ''
+  return `${count} focused ${focuses.length === 1 ? 'reviewer' : 'reviewers'}: ${each.join(' · ')}${unmerged}`
+}
+
 export type SummaryInput = {
   headSha: string
   /** How this review was run: the automated-review line says it (spec 0.2.0 §5.6). */
@@ -116,8 +148,9 @@ export type SummaryInput = {
   marker: MarkerState
   /** What the requester asked for and did not get, already phrased as sentences by whoever knew
    *  why: `ResolvedSettings.droppedRequestKeys` for a value the deployment does not allow, and the
-   *  comment doorway's own refusals for `--tier thorough` and `--multi`, which it will not pass on
-   *  until the fan-out is built (Criss, 2026-09-14, decision 4). The second kind is why this field
+   *  doorways' own refusals — a flag value the comment parser does not take, and a `--multi` the
+   *  deployment switched off or an automatic review carried (Criss, 2026-09-14, decision 4; spec
+   *  0.2.0 §14.19). The second kind is why this field
    *  exists rather than being read off the settings: a flag the comment parser drops never reaches
    *  `resolveSettings`, so it can never land in `droppedRequestKeys`, and a refusal nobody can see
    *  is indistinguishable from a bug. Empty on the ordinary path. */
@@ -126,6 +159,11 @@ export type SummaryInput = {
    *  the record's `checkout.notWritten` and `checkout.caseCollisions` (spec 0.2.0 §9.3 P10). Empty on
    *  the ordinary path. */
   checkoutGaps: { notWritten: UnwrittenEntry[]; caseCollisions: string[][] }
+  /** A multi-reviewer review's focused reviewers, and how each ended (spec 0.2.0 §8.3). Absent, or
+   *  empty, for a review by one reviewer, whose summary has no such line. */
+  focuses?: FocusOutcome[]
+  /** Whether the check pass merged the focuses' duplicates; read only with `focuses`. */
+  duplicates?: DuplicatesState
 }
 
 /** The most lines "Not in the checkout" prints before it says how many more there are. A pull request
@@ -156,6 +194,10 @@ const checkoutGapLines = (gaps: SummaryInput['checkoutGaps']): string[] => {
 export const summaryBody = (a: SummaryInput): string => {
   const lines: string[] = [
     automatedReviewLine(a),
+    // A paragraph of its own under it, rather than the next line of the same one: whether a single
+    // newline in a comment renders as a break is GitHub's to decide, and a blank line is a break in
+    // every Markdown there is.
+    ...(a.focuses !== undefined && a.focuses.length > 0 ? ['', focusLine(a.focuses, a.duplicates)] : []),
     '',
     `### Review of \`${a.headSha.slice(0, 7)}\``,
     '',
@@ -191,7 +233,7 @@ export const summaryBody = (a: SummaryInput): string => {
   // Criss, 2026-09-14 (decision 4): what was asked for and not done is said out loud, in the place
   // the requester is already reading. The sentences arrive phrased, because the half that knows WHY
   // something was not honoured is the half that refused it — the resolver for a value a deployment
-  // disallows, the comment doorway for `--tier thorough` and `--multi`.
+  // disallows, the doorways for a flag value they do not take and a `--multi` they will not run.
   if (a.refused.length > 0) {
     lines.push('', '#### Not honoured', '')
     for (const r of a.refused) lines.push(`- ${r}`)

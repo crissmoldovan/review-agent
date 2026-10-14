@@ -49,17 +49,36 @@ The retry logic moved into the client. Check every caller still handles a 429.
 | `--model` | a model name | which model reviews |
 | `--budget` | dollars | a **lower** budget for this review |
 | `--check` / `--skip-check` | — | run or skip the [check pass](how-it-works.md#the-check-pass) |
+| `--multi` | — | three focused reviewers instead of one — intent, impact and security — at the tier you chose. See [below](#several-reviewers---multi) |
 
 `--flag=value` also works. A flag the deployment does not allow, or a value a flag does not take, is **not silently
 dropped**: the review runs at the deployment's setting, and the summary lists what was not honoured and why under
-**Not honoured**. `--multi` is always listed there for now, because the multi-reviewer mode it asks for is not
-built yet. `--tier thorough` is one reviewer at `high` effort and is honoured like the other tiers.
+**Not honoured**. `--tier thorough` is one reviewer at `high` effort and is honoured like the other tiers.
 
 The note — the words on the first line that are not flags, and every following line — is passed to the reviewer as
 information. It can point attention somewhere; it cannot change the reviewer's rules.
 
 Every comment is its own request, so asking twice reviews twice. Editing a comment does not start a review.
 The command works on drafts.
+
+### Several reviewers: `--multi`
+
+```
+/review --multi --tier normal
+The retry logic moved into the client and the token handling with it.
+```
+
+runs three reviewers side by side on the same commit, each looking for one kind of problem — **intent** (does the
+change do what it says, and correctly), **impact** (what else it breaks) and **security** — and posts one review
+from what they found. The [check pass](how-it-works.md#the-check-pass) reads all their findings against the code and
+marks the ones that describe the same problem, so a problem two reviewers found is said once.
+
+Use it for a change that is both risky and wide. It costs roughly three reviews: each reviewer has the tier's whole
+budget. The summary says which reviewers ran and how each ended — `intent ✓ · impact ✓ (cut short) · security ✗ (did
+not finish)` — and each inline comment says which one found it. One reviewer failing does not fail the review.
+
+It is never automatic: only a comment, or the **Re-run** button of a review that used it, runs it. A deployment can
+switch it off; then `--multi` is listed under **Not honoured** and one reviewer runs.
 
 ### Who may ask
 
@@ -91,7 +110,8 @@ filled with copies. It opens with one line saying it is automated and how it was
 
 — `GitHub App` for the App's reviews. A review posted another way names that instead: `run by @alice from the
 command line` when a person posted it with their own token, `via the SDK` when a service did. Such a review appears
-under the poster's name, and this line is what says they did not write it. Then the summary says:
+under the poster's name, and this line is what says they did not write it. A [`--multi`](#several-reviewers---multi)
+review adds a line naming its three reviewers and how each ended. Then the summary says:
 
 - which commit was reviewed;
 - the reviewer's summary of the change, and its **intent** verdict — whether the change does what its description
@@ -123,7 +143,9 @@ Evidence:
 ```
 
 and, when the fix is small, a `suggestion` block you can apply from GitHub's interface (up to 20 lines, and only
-when it replaces exactly the lines commented on; otherwise the fix is shown as plain code).
+when it replaces exactly the lines commented on; otherwise the fix is shown as plain code). On a
+[`--multi`](#several-reviewers---multi) review the first line also names the reviewer that found it:
+`Severity 7/10 · correctness · intent focus`.
 
 The inline comments arrive as one **review** with the state "Commented", whose text opens with the same automated
 line as the summary. The reviewer **never approves and never requests changes**.
@@ -134,7 +156,8 @@ Which findings become inline comments:
 - the rest go in the summary;
 - **low** findings (below 4) are capped: at most **3** are mentioned on the first review, and none on later reviews;
 - findings the [check pass](how-it-works.md#the-check-pass) **refuted** are not said at all, and the others are
-  shown at the check pass's severity.
+  shown at the check pass's severity;
+- on a `--multi` review, a finding the check pass marked as the same problem as an earlier one is not said either.
 
 ### 3. A check run
 

@@ -14,6 +14,9 @@ describe('defaultDeploymentConfig', () => {
     expect(c.model).toBe('claude-opus-5')
     expect(c.effort).toBe('low')
     expect(c.autoReview).toBe('open+ready')
+    // Spec 0.2.0 §14.19: on by default — the mode only ever runs on request, from someone with push
+    // access in the App — with this switch for a deployment that does not want to pay for it.
+    expect(c.allowMulti).toBe(true)
     expect(c.skills).toEqual([])
 
     expect(c.severity.bands).toEqual({ critical: 9, high: 7, medium: 4 })
@@ -117,10 +120,39 @@ describe('resolveSettings precedence', () => {
     expect(s.budget.targetUsd).toBe(8)
   })
 
-  it('still reads multi off a tier a deployment gave more than one reviewer', () => {
+  // Spec 0.2.0 §14.16 and §14.19: the multi-reviewer mode is a flag a request carries, never a tier's
+  // setting. It used to be read off a tier with `agents > 1`, which cost nothing while nothing ran
+  // several reviewers; now it runs them, and a tier table would turn an AUTOMATIC review — which
+  // carries no `multi` — into one that costs three.
+  it('runs several reviewers only when the request asks, whatever a tier says about agents', () => {
     const deployment = defaultDeploymentConfig()
+    deployment.tiers.basic = { ...deployment.tiers.basic, agents: 3 }
     deployment.tiers.normal = { ...deployment.tiers.normal, agents: 3 }
-    expect(resolveSettings({ deployment, repo: null, request: request({ tier: 'normal' }) }).multi).toBe(true)
+    // An automatic review: no tier, no multi.
+    expect(resolveSettings({ deployment, repo: null, request: request() }).multi).toBe(false)
+    expect(resolveSettings({ deployment, repo: null, request: request({ tier: 'normal' }) }).multi).toBe(false)
+    expect(resolveSettings({ deployment, repo: null, request: request({ tier: 'normal', multi: false }) }).multi).toBe(false)
+  })
+
+  it('drops a requested multi the deployment switched off, and records that it did (spec 0.2.0 §14.19)', () => {
+    const deployment = { ...defaultDeploymentConfig(), allowMulti: false }
+    const s = resolveSettings({ deployment, repo: null, request: request({ multi: true, tier: 'normal' }) })
+    expect(s.multi).toBe(false)
+    expect(s.tier).toBe('normal')
+    expect(s.droppedRequestKeys).toEqual(['multi'])
+    // Not asked, nothing to drop.
+    expect(resolveSettings({ deployment, repo: null, request: request() }).droppedRequestKeys).toEqual([])
+  })
+
+  it('combines a requested multi with any tier (spec 0.2.0 §14.16)', () => {
+    for (const tier of ['basic', 'normal', 'thorough'] as const) {
+      const s = resolve(null, { tier, multi: true })
+      expect(s.multi).toBe(true)
+      expect(s.tier).toBe(tier)
+      // Each focus runs at the tier's depth and budget: the multi-reviewer mode says how many, not how deep.
+      expect(s.budget).toEqual(resolve(null, { tier }).budget)
+      expect(s.effort).toBe(resolve(null, { tier }).effort)
+    }
   })
 
   it('lets the request override the tier preset', () => {

@@ -1,0 +1,53 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "terminal_reason": "completed",
+  "is_error": false,
+  "num_turns": 15,
+  "duration_ms": 188400,
+  "total_cost_usd": 0.9021877,
+  "usage": {
+    "input_tokens": 22,
+    "output_tokens": 11032,
+    "cache_read_input_tokens": 402118,
+    "cache_creation_input_tokens": 52044
+  },
+  "structured_output": {
+    "summary": "The pull request wraps every client call in a retry loop. Every caller of `request` now waits through up to three attempts, and the error it finally throws has changed type.",
+    "intent": {
+      "verdict": "matches",
+      "note": "Every call in src/client.ts goes through `withRetry`."
+    },
+    "findings": [
+      {
+        "file": "src/client.ts",
+        "line": 88,
+        "severity": 5,
+        "category": "impact",
+        "title": "Callers that catch HttpError no longer see the status code",
+        "explanation": "`withRetry` rethrows a `RetryError` wrapping the last failure, and src/orders/submit.ts:41 checks `err instanceof HttpError` to tell a 409 from a 500. That branch is now dead: every failure is reported as a 500.",
+        "evidence": [
+          "src/client.ts:88 — `throw new RetryError(last)`",
+          "src/orders/submit.ts:41 — `if (err instanceof HttpError && err.status === 409)`"
+        ]
+      },
+      {
+        "file": "src/retry.ts",
+        "line": 24,
+        "severity": 5,
+        "category": "correctness",
+        "title": "Retries fire back to back because setTimeout gets no delay",
+        "explanation": "The wait between attempts is `setTimeout(resolve)` with no second argument, which is a zero delay, so the backoff the loop computes has no effect.",
+        "evidence": [
+          "src/retry.ts:24 — `setTimeout(resolve)`"
+        ]
+      }
+    ],
+    "inconclusive": [
+      {
+        "question": "Does the upstream service send Retry-After on a 429?",
+        "what_would_settle_it": "The service's API documentation, which is not in this repository."
+      }
+    ]
+  }
+}

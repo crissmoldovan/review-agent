@@ -3,12 +3,13 @@ import { posix, win32 } from 'node:path'
 import { removeCheckout } from './checkout'
 import type { Octokit } from '@octokit/core'
 import {
-  assertNoSecrets, buildPrompt, buildReviewRecord, resolveSettings, reviewJsonSchema,
-  reviewSystemPrompt, scanForSecrets, SecretLeak, writesSummaryComment,
+  assertNoSecrets, buildPrompt, buildReviewRecord, combineFocusRuns, DEFAULT_FOCUS_CONCURRENCY,
+  resolveSettings, REVIEW_LENSES, reviewJsonSchema, reviewSystemPrompt, runFocusedReviews, scanForSecrets,
+  SecretLeak, writesSummaryComment,
   type CheckVerdict, type ClaudeRuntime, type DeploymentConfig, type EngineInput, type EngineResult,
-  type MaterialisedSkill, type materialiseSkills, type PreviousFinding, type RecheckPassResult,
-  type ResolvedSettings, type ReviewOutput, type ReviewRecord, type ReviewRequest, type runCheckPass,
-  type runEngine, type runRecheckPass, type UnwrittenEntry, type Usage,
+  type FocusRun, type MaterialisedSkill, type materialiseSkills, type PreviousFinding,
+  type RecheckPassResult, type ResolvedSettings, type ReviewOutput, type ReviewRecord, type ReviewRequest,
+  type runCheckPass, type runEngine, type runRecheckPass, type UnwrittenEntry, type Usage,
 } from '@review-agent/core'
 import type { downloadArchive } from './archive'
 import type { fetchPullRequest, PullRequestContext } from './pr'
@@ -53,6 +54,11 @@ export type RunReviewDeps = {
    *  credential-file line has to land before a review that takes minutes, not after it. The CLI
    *  passes its stderr; the trigger.dev task passes its logger. */
   note: (s: string) => void
+  /** How many focused reviewers of a multi-reviewer review run at once (spec 0.2.0 §8.3 point 4); a
+   *  review by one reviewer ignores it. `defaultRunReviewDeps` says 3 — all of them, side by side, on
+   *  a laptop, CI or a VPS. The App's runner says 1: three Claude processes do not fit its 1 GB machine.
+   *  Left out, `DEFAULT_FOCUS_CONCURRENCY` (3). */
+  concurrency?: number
 }
 
 export type RunReviewResult = {
@@ -215,9 +221,36 @@ export const runReview = async (a: {
       ...(a.runtime !== undefined && { runtime: a.runtime }),
     }
 
+    // One reviewer, or one per focus (spec 0.2.0 §8.3). Each focus runs through `deps.runEngine`, the
+    // same function one reviewer does, so a caller that wraps it to watch the spend sees every focus's;
+    // each has the tier's budget and ceiling, and a focus that fails is recorded rather than allowed
+    // to fail the review (`runFocusedReviews`). Their answers are then one engine result
+    // (`combineFocusRuns`), and nothing below this line needs to know there were several.
+    let focusRuns: FocusRun[] = []
+    let ran: EngineResult
+    if (settings.multi) {
+      const concurrency = deps.concurrency ?? DEFAULT_FOCUS_CONCURRENCY
+      deps.note(`running ${REVIEW_LENSES.length} focused reviewers (${REVIEW_LENSES.join(', ')}), ${concurrency} at a time, each with this tier's budget: up to $${settings.budget.ceilingUsd.toFixed(2)} apiece at per-token API prices`)
+      const couldNotRun = new Set<string>()
+      focusRuns = await runFocusedReviews({
+        input, run: deps.runEngine, concurrency,
+        onFailure: (lens, e) => {
+          couldNotRun.add(lens)
+          deps.note(`the ${lens} reviewer could not run, and the review goes on without it: ${e instanceof Error ? e.message : String(e)}`)
+        },
+      })
+      for (const f of focusRuns) {
+        if (f.result.output === null && !couldNotRun.has(f.lens)) {
+          deps.note(`the ${f.lens} reviewer returned no answer (${f.result.failure?.kind ?? 'no output'}); the review goes on without it`)
+        }
+      }
+      ran = combineFocusRuns(focusRuns)
+    } else {
+      ran = await deps.runEngine(input)
+    }
+
     // The paths, before anything reads them (spec 0.2.0 §9.3 P11): the secret scan, the check pass,
     // the record and the anchoring all see one spelling, the repository's.
-    const ran = await deps.runEngine(input)
     const result: EngineResult = ran.output === null
       ? ran
       : { ...ran, output: withRepositoryPaths(ran.output, checkoutDir) }
@@ -225,9 +258,15 @@ export const runReview = async (a: {
 
     // Design §4.6: cheap enough to leave on wherever findings are posted. It runs after the secret
     // scan, never before — a review that cannot be emitted must not buy a second model call.
+    // On a multi-reviewer review this is the ONE pass over the union of the focuses' findings, and it
+    // also marks duplicates (decision §14.17): told how many focuses reported anything, it is asked to,
+    // and its budget grows with them (check-pass.ts says why).
     let check: CheckPassResult | null = null
     if (settings.check && result.output !== null) {
-      check = await deps.runCheckPass({ findings: result.output.findings, input })
+      const reporting = focusRuns.filter((f) => (f.result.output?.findings.length ?? 0) > 0).length
+      check = await deps.runCheckPass({
+        findings: result.output.findings, input, ...(settings.multi && { focuses: reporting }),
+      })
       assertVerdictsCarryNoSecrets(check.verdicts)
     }
 
@@ -262,7 +301,11 @@ export const runReview = async (a: {
       const asked = { previous: previousFindings, input,
         // What the review and the check have already cost. The pass refuses to start if this leaves
         // less headroom under the review's own ceiling than the pass's own target.
-        spentUsd: result.usage.costUsd + (check?.usage.costUsd ?? 0) }
+        spentUsd: result.usage.costUsd + (check?.usage.costUsd ?? 0),
+        // A multi-reviewer review's ceiling is one tier ceiling per focus (spec 0.2.0 §8.3), and
+        // `result.usage` above is every focus's spend: measured against one focus's ceiling, this pass
+        // would be refused on every multi-reviewer re-review.
+        ...(settings.multi && { ceilingUsd: settings.budget.ceilingUsd * focusRuns.length }) }
       const answered = await deps.runRecheckPass(asked).catch((): RecheckPassResult => ({
         judgements: [], usage: emptyUsage(), ran: false, skipped: 'error',
       }))
@@ -272,7 +315,7 @@ export const runReview = async (a: {
     // Built on every run, not only when somebody asked to see it: it is pure, it costs nothing, and
     // the trigger.dev task returns it whatever the CLI does with it.
     const record = buildReviewRecord({
-      request, settings, result, skills, check, recheck, removedFromCheckout: removed,
+      request, settings, result, skills, check, recheck, focuses: focusRuns, removedFromCheckout: removed,
       notWrittenToCheckout: notWritten, caseCollisions,
       startedAt, finishedAt: deps.now(),
     })

@@ -2,12 +2,12 @@ import { z } from 'zod'
 import type { DeploymentConfig, Effort, ReviewRequest, Tier } from '@review-agent/core'
 // RERUN_IDENTIFIER is imported, never redefined and never re-exported: Task 6 owns the string because
 // Task 6 writes the button, and decide.test.ts imports it from the same place.
-import { MARKER_OPEN, MULTI_REFUSED, RERUN_IDENTIFIER, refuseUnbuilt } from '@review-agent/github'
+import { MARKER_OPEN, RERUN_IDENTIFIER, refuseUnbuilt } from '@review-agent/github'
 
 /** Decision 4's refusals and the function every other doorway applies them with live in
  *  `@review-agent/github` since 0.2.0 (spec 0.2.0 §3.1), so the CLI and the SDK refuse exactly what
  *  this receiver refuses. Re-exported, so `@review-agent/app/receiver` still offers them. */
-export { MULTI_REFUSED, THOROUGH_REFUSED, refuseUnbuilt } from '@review-agent/github'
+export { MULTI_REFUSED, MULTI_REFUSED_AUTOMATIC, THOROUGH_REFUSED, refuseUnbuilt } from '@review-agent/github'
 
 export type WebhookDelivery = { event: string; payload: unknown }
 
@@ -46,9 +46,12 @@ const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
  *  the deployment's defaults — but it is NAMED in `refused`, never dropped in silence (Criss,
  *  2026-09-14, decision 4). That is the trap: a value this parser drops never reaches
  *  `resolveSettings`, so it can never land in `droppedRequestKeys`, and this list is the only way
- *  the summary (Task 3) can say so. `--multi` is refused outright until the multi-reviewer mode is
- *  built (spec 0.2.0 §8.3). `--tier thorough` was refused with it until 0.2.0, which made it one
- *  reviewer at `high` effort everywhere (§14.1), and is honoured like the other two tiers. */
+ *  the summary (Task 3) can say so. `--multi` asks for the multi-reviewer mode (spec 0.2.0 §8.3,
+ *  decision §14.16): the parser honours it, and a deployment that switched the mode off has it
+ *  refused by `decideDelivery` and again by the runner, which also checks push access before anything
+ *  is spent (§14.19). It was refused outright until 0.2.0 built the mode. `--tier thorough` was
+ *  refused with it until 0.2.0, which made it one reviewer at `high` effort everywhere (§14.1), and is
+ *  honoured like the other two tiers. */
 export type CommandFlags = { request: Partial<ReviewRequest>; refused: string[] }
 
 export function parseCommandFlags(rest: string): CommandFlags {
@@ -75,7 +78,7 @@ export function parseCommandFlags(rest: string): CommandFlags {
       case '--effort': { const v = value(); if ((EFFORTS as readonly string[]).includes(v)) out.effort = v as Effort; else notUsed('--effort', v); break }
       case '--model': { const v = value(); if (v !== '') out.model = v; break }
       case '--budget': { const v = value(); const n = Number(v); if (Number.isFinite(n) && n > 0) out.budgetUsd = n; else notUsed('--budget', v); break }
-      case '--multi': refused.push(MULTI_REFUSED); break
+      case '--multi': out.multi = true; break
       case '--check': out.check = true; break
       case '--skip-check': out.check = false; break
       default: break // an unknown flag is free text as far as this parser is concerned
@@ -236,6 +239,9 @@ export function decideDelivery(a: { delivery: WebhookDelivery; deployment: Deplo
     if (e.action !== 'opened' && e.action !== 'ready_for_review') {
       return ignore(`pull_request.${e.action} is not a trigger (design §5)`)
     }
+    // Never `multi`, and no flag can put it here: an automatic review is paid for on nobody's say-so,
+    // so it runs one reviewer (spec 0.2.0 §8.3 point 5, decision §14.19). The runner refuses one
+    // anyway, should a payload built by hand arrive with it.
     return {
       kind: 'review',
       installationId: e.installation.id,
@@ -262,7 +268,14 @@ export function decideDelivery(a: { delivery: WebhookDelivery; deployment: Deplo
     if (e.comment.user?.type === 'Bot') return ignore('a comment written by a Bot account')
     const rest = commandMatch(e.comment.body, deployment.command)
     if (rest === null) return ignore('a pull request comment that does not start with the command')
-    const { flags, refused, brief } = splitCommand(rest)
+    const split = splitCommand(rest)
+    // Decision 4 for the one flag a deployment can switch off: `--multi` with `allowMulti: false`
+    // (spec 0.2.0 §14.19) is taken off here and named, so the payload never asks for what this
+    // deployment does not run.
+    const allowed = refuseUnbuilt(split.flags, { allowMulti: deployment.allowMulti })
+    const flags = allowed.request
+    const refused = [...split.refused, ...allowed.refused]
+    const { brief } = split
     return {
       kind: 'review',
       installationId: e.installation.id,
@@ -291,8 +304,11 @@ export function decideDelivery(a: { delivery: WebhookDelivery; deployment: Deplo
     }
     const pr = e.check_run.pull_requests?.[0]?.number
     if (pr === undefined) return ignore('the re-run button was pressed on a check run with no pull request')
-    // Decision 4: a Re-run repeats the settings it carried, except the one that is not built.
-    const carried = refuseUnbuilt(decodeRequestRefinement(e.check_run.external_id) ?? {})
+    // Decision 4: a Re-run repeats the settings it carried — `multi` among them, since a button press
+    // is a request like a comment (spec 0.2.0 §14.19) — except what this deployment does not allow.
+    const carried = refuseUnbuilt(decodeRequestRefinement(e.check_run.external_id) ?? {}, {
+      allowMulti: deployment.allowMulti,
+    })
     return {
       kind: 'review',
       installationId: e.installation.id,

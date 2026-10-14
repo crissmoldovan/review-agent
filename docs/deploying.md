@@ -82,7 +82,8 @@ import { decideDelivery, dispatchReview, sdkTriggerPort, verifyDelivery } from '
 
 export const runtime = 'nodejs' // node:crypto is needed to check the signature
 
-// Only `command` and `autoReview` are read here. If you change the command word, change it in the runner too.
+// Only `command`, `autoReview` and `allowMulti` are read here. If you change the command word or `allowMulti`,
+// change it in the runner too.
 const deployment = defaultDeploymentConfig()
 
 export async function POST(request: Request): Promise<Response> {

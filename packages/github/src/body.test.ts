@@ -35,6 +35,14 @@ describe('inlineBody', () => {
   it('says nothing about evidence when there is none, rather than an empty heading', () => {
     expect(inlineBody(finding({ evidence: [] })).toLowerCase()).not.toContain('evidence')
   })
+
+  // Spec 0.2.0 §8.3: on a multi-reviewer review, which focus found it — after the severity and the
+  // category, and nowhere on a review by one reviewer.
+  it('names the focus that found it on a multi-reviewer review, and only there', () => {
+    expect(inlineBody(finding({ lens: 'security' })).split('\n')[0]).toBe('**Severity 7/10** · security · security focus')
+    expect(inlineBody(finding({ category: 'correctness', lens: 'intent' })).split('\n')[0]).toBe('**Severity 7/10** · correctness · intent focus')
+    expect(inlineBody(finding()).split('\n')[0]).toBe('**Severity 7/10** · security')
+  })
 })
 
 describe('the suggested change', () => {
@@ -177,6 +185,41 @@ describe('summaryBody', () => {
     expect(body).not.toContain('Tier **')
   })
 
+  // Spec 0.2.0 §8.3 point 2: a multi-reviewer review says which focuses ran and how each ended, on
+  // its own line under the automated-review line.
+  it('names the focused reviewers of a multi-reviewer review, and how each ended, under the automated line', () => {
+    const body = summaryBody(summaryInput({
+      focuses: [
+        { lens: 'intent', finished: true, cutShort: false },
+        { lens: 'impact', finished: true, cutShort: true },
+        { lens: 'security', finished: false, cutShort: true },
+      ],
+      duplicates: 'merged',
+    }))
+    const lines = body.split('\n')
+    expect(lines[0]).toContain('**Automated review**')
+    expect(lines[2]).toBe('Three focused reviewers: intent ✓ · impact ✓ (cut short) · security ✗ (did not finish)')
+    expect(lines[4]).toBe('### Review of `4f8e2a1`')
+  })
+
+  it('says so when the focuses’ findings were not merged, because the check pass was off or said nothing', () => {
+    const focuses = [{ lens: 'intent', finished: true, cutShort: false }, { lens: 'impact', finished: true, cutShort: false }]
+    expect(summaryBody(summaryInput({ focuses, duplicates: 'check-off' }))).toContain(
+      'Two focused reviewers: intent ✓ · impact ✓ · the check pass was off, so findings were not merged and the same problem may be listed twice',
+    )
+    expect(summaryBody(summaryInput({ focuses, duplicates: 'check-unanswered' }))).toContain(
+      'the check pass returned no verdicts, so findings were not merged',
+    )
+    expect(summaryBody(summaryInput({ focuses, duplicates: 'merged' }))).not.toContain('not merged')
+  })
+
+  it('has no focus line on a review by one reviewer', () => {
+    for (const body of [summaryBody(summaryInput()), summaryBody(summaryInput({ focuses: [] }))]) {
+      expect(body).not.toContain('focused reviewer')
+      expect(body.split('\n')[2]).toBe('### Review of `4f8e2a1`')
+    }
+  })
+
   it('gives the intent verdict and the note behind it', () => {
     const body = summaryBody(summaryInput())
     expect(body).toContain('matches')
@@ -214,12 +257,12 @@ describe('summaryBody', () => {
     // product that ignored you. The sentences arrive already phrased — this only renders them.
     const body = summaryBody(summaryInput({
       refused: [
-        '`--tier thorough` — the multi-reviewer fan-out is not built yet, so this ran at `basic`.',
+        '`--multi` — this deployment does not run several reviewers on one review, so one reviewer ran.',
         '`--budget` — the deployment does not allow a request to raise it.',
       ],
     }))
     expect(body).toContain('Not honoured')
-    expect(body).toContain('the multi-reviewer fan-out is not built yet')
+    expect(body).toContain('this deployment does not run several reviewers on one review')
     expect(body).toContain('the deployment does not allow a request to raise it')
   })
 

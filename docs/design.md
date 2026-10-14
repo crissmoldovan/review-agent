@@ -9,9 +9,10 @@
 > - **Re-reviews (§5, "Re-review").** A later review no longer matches earlier findings against the new ones. A
 >   separate pass asks the model whether each earlier finding is still present in the code. When a finding is judged
 >   resolved, a note is appended to its inline comment. A `/dispute` or `/defer` reply outranks the model.
-> - **`thorough` and `multi` (§3, §6).** The multi-reviewer fan-out is not built. The CLI runs `thorough` as one
->   reviewer at `high` effort. The App still refuses `thorough` and `multi` and names the refusal. A separate
->   multi-reviewer mode, not a tier, is planned for 0.2.0.
+> - **`thorough` and `multi` (§3, §6).** `thorough` is one reviewer at `high` effort, in the CLI and the App alike.
+>   Several reviewers is a separate multi-reviewer mode, not a tier, built in 0.2.0: a request asks for it with
+>   `--multi`, with any tier, and an automatic review never runs it (see
+>   [configuration](configuration.md#the-multi-reviewer-mode)).
 > - **The GitHub Action (§1, §2) is not built**, and there is no `action` package. The CLI prints a review and never
 >   posts one.
 > - **Skills (§4.7).** A skill source is a local directory or a GitHub repository at a ref, not a package or an

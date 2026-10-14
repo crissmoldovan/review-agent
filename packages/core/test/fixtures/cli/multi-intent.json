@@ -1,0 +1,55 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "terminal_reason": "completed",
+  "is_error": false,
+  "num_turns": 12,
+  "duration_ms": 151200,
+  "total_cost_usd": 0.7134502,
+  "usage": {
+    "input_tokens": 18,
+    "output_tokens": 9120,
+    "cache_read_input_tokens": 301442,
+    "cache_creation_input_tokens": 40211
+  },
+  "structured_output": {
+    "summary": "The pull request makes the HTTP client retry a failed request up to three times with exponential backoff, as its description says. The retry loop is in src/retry.ts and the client wraps every call in it. The delay it computes is never used, so the retries do not back off.",
+    "intent": {
+      "verdict": "partial",
+      "note": "Three attempts are made (src/retry.ts:18-27), but the backoff the description promises is computed at :22 and never awaited."
+    },
+    "findings": [
+      {
+        "file": "src/retry.ts",
+        "line": 24,
+        "end_line": 24,
+        "severity": 6,
+        "category": "correctness",
+        "title": "The computed delay is never passed to setTimeout",
+        "explanation": "`delayMs` is computed on line 22, but line 24 awaits `setTimeout(resolve)` with no delay, so every retry fires at once and a rate-limited service sees three requests in the same millisecond.",
+        "evidence": [
+          "src/retry.ts:22 — `const delayMs = baseMs * 2 ** attempt`",
+          "src/retry.ts:24 — `await new Promise((resolve) => setTimeout(resolve))`"
+        ],
+        "suggestion": "    await new Promise((resolve) => setTimeout(resolve, delayMs))"
+      },
+      {
+        "file": "src/retry.ts",
+        "line": 13,
+        "severity": 4,
+        "category": "intent",
+        "title": "The description promises jitter that the code does not add",
+        "explanation": "The description says each delay has random jitter; nothing in the retry loop adds any, so clients that fail together retry together.",
+        "evidence": [
+          "src/retry.ts:13-27 — no call to Math.random or any jitter helper"
+        ]
+      }
+    ],
+    "inconclusive": [
+      {
+        "question": "Does the upstream service send Retry-After on a 429?",
+        "what_would_settle_it": "The service's API documentation, which is not in this repository."
+      }
+    ]
+  }
+}

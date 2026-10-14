@@ -46,6 +46,27 @@ const verdictsById = (check: CheckedFindings | null): Map<string, CheckVerdict> 
   return byId
 }
 
+/** The positions, in the array the check pass was given, of the findings it marked as repeating an
+ *  earlier one (`CheckVerdict.duplicateOf`; a multi-reviewer review, spec 0.2.0 §8.3, decision
+ *  §14.17). A duplicate is not said — like a refuted finding — and stays on the record.
+ *
+ *  By position rather than by `findingId`, unlike `verdictsById`: the verdict names the finding it is
+ *  about by index, the caller drops these before anchoring reorders anything, and two findings that
+ *  share an id — the same title twice in one file — are exactly the pair this must tell apart, keeping
+ *  one and dropping the other. A `duplicateOf` that does not point at an earlier finding names nothing
+ *  (`runCheckPass` already makes it null; this does not trust that it did), so a pair can never drop
+ *  each other. Empty when no check pass ran, or when it was not asked about duplicates. */
+export const duplicatesIn = (check: CheckedFindings | null): Set<number> => {
+  const out = new Set<number>()
+  for (const v of check?.verdicts ?? []) {
+    const d = v.duplicateOf
+    if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d >= v.index) continue
+    if (v.index >= (check?.findings.length ?? 0)) continue
+    out.add(v.index)
+  }
+  return out
+}
+
 // `atCheckSeverity` was here and is deleted (Criss, 2026-09-16). It existed for one caller: the
 // marker's matcher paired an old row against a new finding by NEAREST SEVERITY, and the marker
 // stores what was said, which carries the check pass's number — so handing the matcher the

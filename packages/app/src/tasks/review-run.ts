@@ -302,13 +302,18 @@ const reviewOnce = async (
 
   const { owner, repo } = splitRepo(payload.request.repo)
   const number = payload.request.pr
-  // Criss, 2026-09-14 (decision 4): `multi` is not honoured until the multi-reviewer mode is built,
-  // by whatever road it arrived. The comment parser refuses it and so does the Re-run branch
-  // (Task 10); a payload triggered by hand reaches here past both. Stripped before anything is
+  const deployment = deps.deployment()
+  // Criss, 2026-09-14 (decision 4), and spec 0.2.0 §14.19: `multi` runs several reviewers, so it is
+  // honoured only when somebody asked — a comment or the Re-run button, whose requester must still
+  // pass the push-access check below before anything is spent — and only when this deployment allows
+  // it. An AUTOMATIC review never runs it, by whatever road it arrived: no doorway puts it on one, and
+  // a payload triggered by hand reaches here past every doorway. Stripped before anything is
   // resolved, so the settings, the check run's external_id and runReview all see the request
   // without it — and named in the summary through `refusedByDoorway` below. `thorough` used to be
   // stripped with it; since 0.2.0 it is one reviewer at `high` effort and is honoured (§14.1).
-  const unbuilt = refuseUnbuilt(payload.request)
+  const unbuilt = refuseUnbuilt(payload.request, {
+    allowMulti: deployment.allowMulti, automatic: isAutomatic(payload.request),
+  })
   const request: ReviewRequest = {
     ...unbuilt.request,
     repo: payload.request.repo, pr: payload.request.pr, headSha: payload.request.headSha,
@@ -319,7 +324,6 @@ const reviewOnce = async (
     identity, installationId: payload.installationId, repositories: [repo],
   })
   const octokit = deps.makeOctokit(minted.token)
-  const deployment = deps.deployment()
 
   const pr = await deps.fetchPullRequest({ octokit, owner, repo, number })
   // The reviewed repository's own file, from the BASE commit, read here for the same reason the
@@ -392,7 +396,7 @@ const reviewOnce = async (
   }
 
   // Task 10's refusals, carried to the summary (Criss, decision 4): the comment doorway's, and the
-  // one refuseUnbuilt made at the top of this function for a payload that carried `multi` itself.
+  // one refuseUnbuilt made at the top of this function for a `multi` it would not run.
   // A flag the comment doorway dropped never reached resolveSettings, so this is the only road by
   // which it is ever named. De-duplicated, because a hand-built payload can carry a refusal sentence
   // and the flag it refuses.

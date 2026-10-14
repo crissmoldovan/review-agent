@@ -20,7 +20,8 @@ the App adds the parts that post.
    before the model starts, and listed on the record. Entries that could not be written, and paths that differ only
    by letter case or Unicode form, are listed on the record and in the summary.
 8. **Load skills** the deployment allows, read-only.
-9. **Review.** One Claude Code process reads the repository and answers in a fixed format.
+9. **Review.** One Claude Code process reads the repository and answers in a fixed format — or, when the request
+   asked for [several reviewers](#a-multi-reviewer-review-step-by-step), one process per focus.
 10. **Check.** A second process tries to disprove each finding.
 11. **Re-check** (re-reviews only). A third process is asked whether each earlier finding is still there.
 12. **Scan for secrets.** If anything in the output matches a secret pattern, the review is withheld rather than
@@ -115,6 +116,37 @@ finding it answers `confirmed`, `refuted` or `uncertain`, with its own severity 
 So the check pass can only make a review say less, or say it less loudly. It is on in every tier and has its own
 budget, a quarter of the review's. Turn it off per request with `--skip-check`.
 
+On a [multi-reviewer review](#a-multi-reviewer-review-step-by-step) it is also asked, for each finding, whether it
+repeats an earlier one in the list — the same defect, however it is worded — and a finding it marks so is not posted
+either. A review by one reviewer is never asked this: its check pass runs the same words it always has.
+
+## A multi-reviewer review, step by step
+
+`/review --multi` (any tier) changes steps 9 and 10 above and the summary; everything else is the same review.
+
+1. **Three reviewers, one per focus.** `intent` (does the change do what it says, and correctly), `impact` (what else
+   it breaks or silently changes) and `security`. Each is the same headless `claude` process as a single review — the
+   same flags, tools, checkout, skills and credential — with one more line in its instructions naming its focus and
+   telling it to report only findings in it.
+2. **Each with the tier's budget.** Every reviewer gets the tier's soft budget and its own `--max-budget-usd` ceiling,
+   so the three may spend up to three times the tier's ceiling between them. One stopped by its ceiling keeps what it
+   had written; the others go on.
+3. **Side by side, or one at a time.** Up to three at once in the CLI and the library; one at a time in the App's
+   runner, whose machine does not fit three. A stop — Ctrl-C, the deadline, a cancelled run — kills every reviewer
+   that is running and starts none that is waiting.
+4. **One failing does not fail the review.** A reviewer that crashes or answers nothing is recorded and named, and
+   the review goes on with the others. Only when none of the three produced anything is the review unfinished.
+5. **Combined.** Their findings are put together, each tagged with its focus; the summary and the intent verdict are
+   the `intent` reviewer's (another's, if it did not answer).
+6. **One check pass** over all the findings, which also marks duplicates. Its budget is a quarter of the tier's
+   target for each reviewer that reported a finding, because what it costs follows how many findings it has to read.
+   With the check pass off, nothing is merged and the summary says so.
+7. **Posted as one review.** A duplicate is not said, like a refuted finding. The summary gets a line under the
+   automated one — `Three focused reviewers: intent ✓ · impact ✓ (cut short) · security ✗ (did not finish)` — and
+   each inline comment names the focus that found it.
+8. **Recorded.** The record's `focuses` keeps each reviewer's cost, whether it answered, whether it was cut short, its
+   failure and how many findings it reported; `usage` and `costUsd` include all three.
+
 ## Choosing what to post
 
 From the checked findings, worst first:
@@ -162,12 +194,13 @@ that produced them are known, so it records all of them.
 | `request` | repository, pull request, head commit, who asked, the request id, and any request keys the deployment did not allow |
 | `settings` | tier, model, effort, check pass, budget, reporting settings, severity bands |
 | `skills` | each skill loaded, and where from |
-| `usage`, `checkUsage`, `recheckUsage` | per pass: cost, turns, duration, input, output and cached tokens |
-| `costUsd` | the total of the three passes, at per-token API prices |
+| `usage`, `checkUsage`, `recheckUsage` | per pass: cost, turns, duration, input, output and cached tokens. On a multi-reviewer review `usage` is the three reviewers added up, its duration included |
+| `focuses` | on a multi-reviewer review, one entry per reviewer: `lens`, `usage`, `finished`, `cutShort`, `failure` and how many `findings` it reported; empty otherwise |
+| `costUsd` | the total of the three passes, at per-token API prices — every reviewer of a multi-reviewer review included |
 | `cutShort`, `wrapUpFired` | whether the ceiling stopped the review; `wrapUpFired` is always `false` in this release |
-| `failure` | why the review did not finish, or `null` |
-| `output` | the summary, intent verdict, findings and inconclusive items |
-| `checkVerdicts`, `recheckJudgements`, `recheckSkipped` | what the check and re-check passes said, or why the re-check did not run |
+| `failure` | why the review did not finish, or `null`. On a multi-reviewer review, `null` when any reviewer answered; otherwise the first reviewer's, with every reviewer's in `focuses` |
+| `output` | the summary, intent verdict, findings and inconclusive items. On a multi-reviewer review each finding carries the `lens` that found it, duplicates included |
+| `checkVerdicts`, `recheckJudgements`, `recheckSkipped` | what the check and re-check passes said, or why the re-check did not run. On a multi-reviewer review each verdict carries `duplicateOf`: the earlier finding it repeats, or `null` |
 | `checkout` | `removedCredentialFiles`: what was deleted from the checkout before the review; `notWritten`: archive entries that could not be written, each with its path and error code; `caseCollisions`: groups of paths that differ only by letter case or Unicode form |
 | `timings` | start, finish, duration |
 
@@ -177,6 +210,7 @@ that produced them are known, so it records all of them.
 |---|---|---|
 | the model crashed | `crashed` | check run `neutral`, summary says it did not complete |
 | the ceiling stopped it | `budget` | whatever it found is still posted, marked cut short |
+| one or two of a multi-reviewer review's reviewers failed | in `focuses` | the others' findings are posted; the summary names which did not finish |
 | its answer did not match the format | `schema` | `neutral`, did not complete |
 | it gave no answer | `refusal` | `neutral`, did not complete |
 | Claude Code reported an error | `cli-error` | `neutral`, did not complete |

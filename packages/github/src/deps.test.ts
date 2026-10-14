@@ -58,6 +58,19 @@ describe('defaultRunReviewDeps (spec 0.2.0 §3.1)', () => {
     expect(() => defaultRunReviewDeps({ note: () => undefined, skillCacheDir: 'skills' })).toThrow(TypeError)
   })
 
+  // Spec 0.2.0 §8.3 point 4: on a laptop, CI or a VPS, the focuses of a multi-reviewer review run side
+  // by side; a host short of memory says how many.
+  it('runs every focused reviewer at once unless it is told how many may run', () => {
+    expect(defaultRunReviewDeps({ note: () => undefined }).concurrency).toBe(3)
+    expect(defaultRunReviewDeps({ note: () => undefined, concurrency: 1 }).concurrency).toBe(1)
+  })
+
+  it('refuses a concurrency that is not a whole number of at least one', () => {
+    for (const concurrency of [0, -1, 1.5, Number.NaN]) {
+      expect(() => defaultRunReviewDeps({ note: () => undefined, concurrency })).toThrow(TypeError)
+    }
+  })
+
   it('says progress where it is told to', () => {
     const said: string[] = []
     defaultRunReviewDeps({ note: (s) => { said.push(s) } }).note('downloading')

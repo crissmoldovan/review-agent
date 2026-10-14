@@ -32,9 +32,11 @@ The retry logic moved into the client. Check every caller still handles a 429.
 - **Proven on real code:** read-only reviews of real pull requests for cost and quality measurement, and reviews
   posted to a real pull request through the deployed runner.
 - **New and not yet proven live:** the [re-review pass](docs/pull-requests.md#re-reviews) that asks the model
-  whether earlier findings are still present. It is covered by unit tests only.
-- **Not built yet:** a GitHub Action mode, the multi-reviewer mode, posting from the CLI, and changing
-  the runner's settings without editing one function.
+  whether earlier findings are still present, and the [multi-reviewer mode](docs/configuration.md#the-multi-reviewer-mode)
+  (`/review --multi`: three focused reviewers, one check pass that also merges duplicates). Both are covered by unit
+  tests only; the multi-reviewer mode's cost is not measured yet.
+- **Not built yet:** a GitHub Action mode, posting from the CLI, `--multi` in the CLI, and changing the runner's
+  settings without editing one function.
 - **The same model varies from run to run.** One review is a sample.
 
 ## Quick start: review a pull request from your terminal
