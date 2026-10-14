@@ -119,6 +119,10 @@ skills: [
   and made read-only. Set `REVIEW_AGENT_SKILLS_TOKEN` to reach a private repository.
 - Downloads are cached in `REVIEW_AGENT_SKILL_CACHE`, keyed by `repo@ref`, and **a cached entry is never
   refreshed** — so pin a tag or a commit, not a branch.
+- The cache belongs to the user running the reviewer: it is created `0700`, refused if another user owns it, and an
+  entry is used only if this user owns it. Without `REVIEW_AGENT_SKILL_CACHE`, the App's runner uses
+  `review-agent-skills-<uid>` under the temp directory, and the CLI this OS's cache directory (see
+  [the CLI's variables](cli.md#environment-variables)). Nothing is created when no skill is configured.
 - No skill ships with the product; the built-in review instructions are part of the engine, not a skill.
 
 A skill's id is its `path` (for `dir`) or `repo@ref` plus `#path` (for `git`); its short name is the last path segment

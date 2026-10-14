@@ -2,9 +2,9 @@ import { lstat, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Octokit } from '@octokit/core'
-import { create } from 'tar'
+import { create, Header } from 'tar'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { downloadArchive, isCredentialPath, safeEntry, sanitiseCheckout } from './archive'
+import { downloadArchive, isCredentialPath, pathCollisions, safeEntry, sanitiseCheckout } from './archive'
 
 async function tmp(): Promise<string> { return mkdtemp(join(tmpdir(), 'ra-archive-')) }
 
@@ -18,6 +18,25 @@ async function tarballBytes(entries: (root: string) => Promise<void>): Promise<B
     chunks.push(Buffer.from(c as Uint8Array))
   }
   return Buffer.concat(chunks)
+}
+
+/** A tarball written header by header, for entries no filesystem here can hold to tar up: two names
+ *  that differ only by case are one file on macOS, and so are the two Unicode spellings of `café`. */
+type RawEntry = { path: string; type?: 'File' | 'Directory' | 'FIFO'; body?: string }
+const rawTarball = (entries: RawEntry[]): Buffer => {
+  const blocks: Buffer[] = []
+  for (const e of entries) {
+    const body = Buffer.from(e.body ?? '')
+    const header = Buffer.alloc(512)
+    new Header({
+      path: e.path, type: e.type ?? 'File', size: e.type === 'File' || e.type === undefined ? body.length : 0,
+      mode: e.type === 'Directory' ? 0o755 : 0o644, mtime: new Date(0),
+    }).encode(header, 0)
+    blocks.push(header)
+    if (body.length > 0) blocks.push(body, Buffer.alloc((512 - (body.length % 512)) % 512))
+  }
+  blocks.push(Buffer.alloc(1024))
+  return Buffer.concat(blocks)
 }
 
 const SIGNED = 'https://codeload.github.com/acme/widgets/legacy.tar.gz/4f8e2a1?token=signed'
@@ -155,7 +174,7 @@ describe('downloadArchive', () => {
       owner: 'acme', repo: 'widgets', ref: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f', destDir: dest,
     })
 
-    expect(out).toEqual({ dir: dest, removed: [] })
+    expect(out).toEqual({ dir: dest, removed: [], notWritten: [], caseCollisions: [] })
     expect(await readFile(join(dest, 'README.md'), 'utf8')).toBe('# widgets\n')
     expect(await sanitiseCheckout(dest)).toEqual({ gitDirs: [], removed: [] })
     // one argument only: no headers, therefore no Authorization sent to codeload
@@ -174,7 +193,7 @@ describe('downloadArchive', () => {
     const dest = await tmp()
     const octokit = { request: redirectTo(SIGNED) } as unknown as Octokit
     const out = await downloadArchive({ octokit, owner: 'acme', repo: 'widgets', ref: '4f8e2a1', destDir: dest })
-    expect(out).toEqual({ dir: dest, removed: ['.npmrc'] })
+    expect(out).toEqual({ dir: dest, removed: ['.npmrc'], notWritten: [], caseCollisions: [] })
     expect(await exists(join(dest, '.npmrc'))).toBe(false)
     expect((await stat(join(dest, 'README.md'))).isFile()).toBe(true)
   })
@@ -198,5 +217,71 @@ describe('downloadArchive', () => {
       octokit: { request: redirectTo(SIGNED) } as unknown as Octokit,
       owner: 'acme', repo: 'widgets', ref: '4f8e2a1', destDir: await tmp(),
     })).rejects.toThrow('archive carried a .git directory')
+  })
+})
+
+describe('pathCollisions', () => {
+  it('groups paths that differ only by letter case', () => {
+    expect(pathCollisions(['README.md', 'src/a.ts', 'Readme.md', 'docs', 'Docs'])).toEqual([
+      ['Docs', 'docs'], ['README.md', 'Readme.md'],
+    ])
+  })
+
+  it('groups the two Unicode spellings of one name', () => {
+    const composed = 'docs/caf\u00e9.md'
+    const decomposed = 'docs/cafe\u0301.md'
+    expect(pathCollisions([composed, decomposed])).toEqual([[decomposed, composed].sort()])
+  })
+
+  it('finds nothing in distinct paths, nor in one path listed twice', () => {
+    expect(pathCollisions(['a.ts', 'b.ts', 'a.ts', ''])).toEqual([])
+  })
+})
+
+// Spec 0.2.0 §9.3 P10. node-tar warns and carries on when it cannot write an entry; with nobody
+// listening, the file was simply missing from what the reviewer read, and nothing said so.
+describe('downloadArchive — what the checkout does not hold', () => {
+  const download = async (bytes: Buffer) => {
+    vi.stubGlobal('fetch', vi.fn(async (..._args: unknown[]) => new Response(bytes)))
+    return downloadArchive({
+      octokit: { request: redirectTo(SIGNED) } as unknown as Octokit,
+      owner: 'acme', repo: 'widgets', ref: '4f8e2a1', destDir: await tmp(),
+    })
+  }
+
+  it('names an entry it could not write, with the reason, and still extracts the rest', async () => {
+    const out = await download(rawTarball([
+      { path: 'acme-widgets-4f8e2a1/', type: 'Directory' },
+      { path: 'acme-widgets-4f8e2a1/README.md', body: '# widgets\n' },
+      // A named pipe: no extraction writes one, on any OS.
+      { path: 'acme-widgets-4f8e2a1/tmp/queue', type: 'FIFO' },
+    ]))
+    expect(out.notWritten).toEqual([{ path: 'tmp/queue', code: 'TAR_ENTRY_UNSUPPORTED' }])
+    expect(await readFile(join(out.dir, 'README.md'), 'utf8')).toBe('# widgets\n')
+  })
+
+  it('names an entry it refused to write because its path climbs out', async () => {
+    const out = await download(rawTarball([
+      { path: 'acme-widgets-4f8e2a1/README.md', body: '# widgets\n' },
+      { path: 'acme-widgets-4f8e2a1/../../outside.txt', body: 'x' },
+    ]))
+    expect(out.notWritten).toEqual([{ path: '../../outside.txt', code: 'UNSAFE_PATH' }])
+  })
+
+  it('names paths that collide by case or by Unicode form, whatever this filesystem makes of them', async () => {
+    const out = await download(rawTarball([
+      { path: 'acme-widgets-4f8e2a1/', type: 'Directory' },
+      { path: 'acme-widgets-4f8e2a1/README.md', body: 'one\n' },
+      { path: 'acme-widgets-4f8e2a1/Readme.md', body: 'two\n' },
+      { path: 'acme-widgets-4f8e2a1/caf\u00e9.md', body: 'three\n' },
+      { path: 'acme-widgets-4f8e2a1/cafe\u0301.md', body: 'four\n' },
+    ]))
+    // Reported on Linux too, where both were written: the record is read on other machines, and a
+    // reviewer on macOS or Windows would have read one file where the pull request has two.
+    expect(out.caseCollisions).toEqual([
+      ['README.md', 'Readme.md'],
+      ['cafe\u0301.md', 'caf\u00e9.md'].sort(),
+    ].sort((x, y) => (x[0] < y[0] ? -1 : 1)))
+    expect(out.notWritten).toEqual([])
   })
 })

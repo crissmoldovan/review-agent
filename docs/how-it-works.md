@@ -6,8 +6,7 @@ the App adds the parts that post.
 ## One review, step by step
 
 1. **Check the credential.** Exactly one model credential, and no `ANTHROPIC_BASE_URL`, or the review stops here
-   before any GitHub call. (The CLI enforces the second rule and lets `claude` use its own login when neither
-   credential is set.)
+   before any GitHub call. (The CLI lets `claude` use its own login when neither credential is set.)
 2. **Get a GitHub token.** The App mints an installation token scoped to the one repository under review. The CLI
    uses `GITHUB_TOKEN`.
 3. **Read the pull request**: its title, description, head and base commits, the diff and the changed files.
@@ -18,7 +17,8 @@ the App adds the parts that post.
 6. **Open the check run** as `in_progress` (App only, unless `silent`).
 7. **Download the code** at the head commit as an archive — not a clone, so there is no `.git`, no remote URL and no
    token in it. Credential-shaped files (`.env`, `.npmrc`, `*.pem`, `id_rsa`, `.aws/credentials`, …) are **deleted**
-   before the model starts, and listed on the record.
+   before the model starts, and listed on the record. Entries that could not be written, and paths that differ only
+   by letter case or Unicode form, are listed on the record and in the summary.
 8. **Load skills** the deployment allows, read-only.
 9. **Review.** One Claude Code process reads the repository and answers in a fixed format.
 10. **Check.** A second process tries to disprove each finding.
@@ -45,13 +45,20 @@ claude -p --restricted --strict-mcp-config
        [--plugin-dir <skill>]…
 ```
 
+On Windows, and wherever the review instructions are longer than 16,000 characters, they are passed as
+`--append-system-prompt-file <path>` instead — Windows caps a command line at 32,767 characters. The file is
+private (`0600`, in a fresh `0700` directory under the system temp directory), never inside the checkout, and deleted
+when the pass ends.
+
 - `--restricted` ignores every settings file — the user's, and above all the reviewed repository's
   `.claude/settings.json`, which could otherwise define hooks, which are commands.
 - The only tools are **Read, Grep and Glob**: no shell, no writing, no network.
 - The prompt is written to the process's standard input, never its command line.
 - `claude` is resolved to an absolute path before it is started, from absolute `PATH` directories only and never from
   the checkout, so the code under review cannot supply its own.
-- Its environment holds only `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER` and the model credential.
+- Its environment holds only `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER`, `CLAUDE_CONFIG_DIR`, `USE_BUILTIN_RIPGREP`, the
+  model credential and any variable the deployment passes by name ([security](security.md#what-the-model-can-do)).
+  A credential passed with the review is the only one it gets.
 
 ### What the model is told
 
@@ -90,8 +97,10 @@ description, head commit, the requester's note and the diff.
 }
 ```
 
-Claude Code enforces this shape (`--json-schema`), and the engine checks it again. A finding whose `file` is not a
-file in the checkout is dropped: no string the model wrote is used to address anything without being checked.
+Claude Code enforces this shape (`--json-schema`), and the engine checks it again. Each finding's `file` is then made
+a repository path — `\` becomes `/`, a leading `./` goes, and an absolute path inside the checkout becomes relative to
+it — and a finding whose `file` is still not a file in the checkout is dropped: no string the model wrote is used to
+address anything without being checked.
 
 ## The check pass
 
@@ -158,7 +167,7 @@ that produced them are known, so it records all of them.
 | `failure` | why the review did not finish, or `null` |
 | `output` | the summary, intent verdict, findings and inconclusive items |
 | `checkVerdicts`, `recheckJudgements`, `recheckSkipped` | what the check and re-check passes said, or why the re-check did not run |
-| `checkout` | `removedCredentialFiles`: what was deleted from the checkout before the review |
+| `checkout` | `removedCredentialFiles`: what was deleted from the checkout before the review; `notWritten`: archive entries that could not be written, each with its path and error code; `caseCollisions`: groups of paths that differ only by letter case or Unicode form |
 | `timings` | start, finish, duration |
 
 ## When a review fails

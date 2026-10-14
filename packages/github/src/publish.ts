@@ -283,6 +283,7 @@ export async function publishReview(a: {
     intent: output?.intent ?? NO_INTENT,
     summaryOnly: said.summaryOnly, inconclusive: output?.inconclusive ?? [], marker,
     refused: notHonoured,
+    checkoutGaps: { notWritten: record.checkout.notWritten, caseCollisions: record.checkout.caseCollisions },
   })
   const summary: SummaryCommentResult | null = !writesSummary ? null : await upsertSummaryComment({
     octokit, owner, repo, number, body: summaryText, existing: found,

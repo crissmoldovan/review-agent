@@ -51,6 +51,9 @@ const VERDICT: CheckVerdict = {
 
 type Harness = ReviewCommandDeps & { out: string[]; err: string[] }
 
+/** A checkout with nothing taken out and nothing missing: the ordinary download. */
+const NOTHING_MISSING = { removed: [] as string[], notWritten: [] as { path: string; code: string }[], caseCollisions: [] as string[][] }
+
 /** The re-review pass's answer when nothing is asked of it. The CLI reads no marker, so this is
  *  the only answer it could ever get — and it never even asks. */
 const NO_RECHECK: RecheckPassResult = {
@@ -79,7 +82,7 @@ const deps = (over: Partial<ReviewCommandDeps> = {}): Harness => {
     skillCacheDir: vi.fn(() => '/tmp/ra-fake-skill-cache'),
     fetchPullRequest: vi.fn(async () => PR),
     fetchRepoConfig: vi.fn(async () => null),
-    downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, removed: [] as string[] })),
+    downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, ...NOTHING_MISSING })),
     materialiseSkills: vi.fn(async () => []),
     runEngine: vi.fn(async () => RESULT),
     runCheckPass: vi.fn(async () => ({ verdicts: [] as CheckVerdict[], usage: CHECK_USAGE })),
@@ -230,7 +233,7 @@ describe('runReviewCommand', () => {
 
   it('says which credential files it removed, and puts them on the record', async () => {
     const d = deps({
-      downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, removed: ['.npmrc'] })),
+      downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, ...NOTHING_MISSING, removed: ['.npmrc'] })),
     })
     expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', json: true }, d)).toBe(0)
     expect(d.err.join('\n')).toContain('removed 1 credential file from the checkout before the review: .npmrc')
@@ -284,6 +287,73 @@ describe('runReviewCommand', () => {
     expect(d.err.join('\n')).not.toContain('gateway.example')
     expect(d.fetchPullRequest).not.toHaveBeenCalled()
     expect(d.runEngine).not.toHaveBeenCalled()
+  })
+})
+
+// Decision §14.4 and spec 0.2.0 §3.2: exactly one credential, or this machine's `claude login` — and
+// whichever it is, the Claude process gets that one and no other.
+describe('runReviewCommand: the model credential', () => {
+  const KEY = 'sk-ant-api03-FAKE-not-a-real-key'
+  const TOKEN = 'sk-ant-oat01-FAKE-not-a-real-token'
+
+  it('exits 2 when both credentials are set, naming both and neither value, before any GitHub call', async () => {
+    const d = deps({ env: { GITHUB_TOKEN: 'ghp_test', ANTHROPIC_API_KEY: KEY, CLAUDE_CODE_OAUTH_TOKEN: TOKEN } })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16' }, d)).toBe(EXIT_BAD_USAGE)
+    const said = d.err.join('\n')
+    expect(said).toContain('ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN')
+    expect(said).toContain('set exactly one')
+    expect(said).not.toContain(KEY)
+    expect(said).not.toContain(TOKEN)
+    expect(d.fetchPullRequest).not.toHaveBeenCalled()
+    expect(d.runEngine).not.toHaveBeenCalled()
+  })
+
+  it('hands the review the one credential that is set, wrapped so it never prints', async () => {
+    const d = deps({ env: { GITHUB_TOKEN: 'ghp_test', CLAUDE_CODE_OAUTH_TOKEN: TOKEN } })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', json: true }, d)).toBe(0)
+    const credential = vi.mocked(d.runEngine).mock.calls[0][0].runtime?.credential
+    expect(credential?.kind).toBe('oauth-token')
+    expect(credential?.kind === 'oauth-token' && credential.value.reveal()).toBe(TOKEN)
+    expect(JSON.stringify(credential)).not.toContain(TOKEN)
+    // Nor in anything the command printed.
+    expect([...d.out, ...d.err].join('\n')).not.toContain(TOKEN)
+  })
+
+  it('uses this machine’s claude login when neither is set, as it always has', async () => {
+    const d = deps()
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', json: true }, d)).toBe(0)
+    expect(vi.mocked(d.runEngine).mock.calls[0][0].runtime?.credential).toEqual({ kind: 'claude-login' })
+  })
+})
+
+// Spec 0.2.0 §9.3 P14: Ctrl-C stops the review — and the Claude process with it — instead of leaving it
+// running and billing with nobody waiting for the answer.
+describe('runReviewCommand: stopped by the person who started it', () => {
+  it('hands the signal to the review, and says plainly that it stopped', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ra-cli-checkout-'))
+    const controller = new AbortController()
+    const d = deps({
+      makeCheckoutDir: vi.fn(async () => dir),
+      // What the real engine does on an abort: the spawn's signal kills the process and the run
+      // rejects with the abort's reason.
+      runEngine: vi.fn(async (input) => {
+        expect(input.signal).toBe(controller.signal)
+        controller.abort(new Error('the review was interrupted'))
+        throw input.signal?.reason
+      }),
+    })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', check: true }, d, { signal: controller.signal })).toBe(1)
+    expect(d.err.join('\n')).toContain('the review was stopped before it finished')
+    expect(d.out).toEqual([])
+    expect(d.runCheckPass).not.toHaveBeenCalled()
+    // The downloaded code goes with it.
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it('says the usual thing about a failure nobody asked for', async () => {
+    const d = deps({ runEngine: vi.fn(async () => { throw new Error('spawn claude ENOENT') }) })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16' }, d, { signal: new AbortController().signal })).toBe(1)
+    expect(d.err.join('\n')).toContain('the review did not complete: spawn claude ENOENT')
   })
 })
 

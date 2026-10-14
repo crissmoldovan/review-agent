@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defaultDeploymentConfig } from '@review-agent/core'
 import { describe, expect, it } from 'vitest'
@@ -39,6 +40,19 @@ describe('the collaborators the deployed task actually uses', () => {
     } finally {
       await rm(first, { recursive: true, force: true })
       await rm(second, { recursive: true, force: true })
+    }
+  })
+
+  // Spec 0.2.0 §9.3 P13. One `review-agent-skills` for every account on a machine let any of them plant
+  // an entry under the name this runner looks up; the directory is now this user's own.
+  it.skipIf(process.platform === 'win32')('caches skills in a directory of this user’s own under the temp directory', () => {
+    const before = process.env.REVIEW_AGENT_SKILL_CACHE
+    delete process.env.REVIEW_AGENT_SKILL_CACHE
+    try {
+      expect(liveRunReviewDeps({ note: () => undefined }).skillCacheDir())
+        .toBe(join(tmpdir(), `review-agent-skills-${process.getuid?.()}`))
+    } finally {
+      if (before !== undefined) process.env.REVIEW_AGENT_SKILL_CACHE = before
     }
   })
 

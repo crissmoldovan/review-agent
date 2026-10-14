@@ -16,6 +16,13 @@ export const ENGINE_VERSION = '0.1.3'
 
 export type RecordedSkill = { id: string; path: string }
 
+/** An archive entry that is not in the checkout as the archive had it (spec 0.2.0 §9.3 P10): a name the
+ *  filesystem refused (`CON`, `*`, a trailing dot on Windows), a symlink Windows would not make, an
+ *  entry type nothing extracts. `code` is the filesystem's error code (`EINVAL`, `EPERM`, …) or
+ *  node-tar's (`TAR_ENTRY_UNSUPPORTED`, …), or `UNSAFE_PATH` for an absolute or `..` path, which is
+ *  never written anywhere. */
+export type UnwrittenEntry = { path: string; code: string }
+
 export type ReviewRecord = {
   recordVersion: 1
   engineVersion: string
@@ -55,9 +62,18 @@ export type ReviewRecord = {
   /** `null` when the pass ran and answered; otherwise why it did not. Recorded rather than logged
    *  because "no outcome changed" and "the pass never ran" look identical from outside. */
   recheckSkipped: RecheckSkipped | null
-  /** Credential files deleted from the working copy before the model started (github/archive.ts).
-   *  Always present: a review whose inputs had files taken out of them must say which. */
-  checkout: { removedCredentialFiles: string[] }
+  /** What the model could not read in the checkout, and why (github/archive.ts). Always present, every
+   *  list empty when nothing is missing: a review whose inputs had files taken out of them must say
+   *  which.
+   *
+   *  - `removedCredentialFiles`: deleted on purpose before the model started.
+   *  - `notWritten`: entries the extraction did not write (spec 0.2.0 §9.3 P10). Until 0.2.0 these
+   *    were missing in silence.
+   *  - `caseCollisions`: groups of paths that differ only by letter case or Unicode normalisation. On
+   *    a filesystem that ignores the difference (case on macOS and Windows by default, Unicode form on
+   *    macOS) each group was ONE file in the checkout, holding whichever was extracted last. Reported
+   *    on every OS, because a record is read somewhere other than where it was written. */
+  checkout: { removedCredentialFiles: string[]; notWritten: UnwrittenEntry[]; caseCollisions: string[][] }
   timings: { startedAt: string; finishedAt: string; durationMs: number }
 }
 
@@ -69,6 +85,9 @@ export const buildReviewRecord = (a: {
   check: { verdicts: CheckVerdict[]; usage: Usage } | null
   recheck: RecheckPassResult | null
   removedFromCheckout: string[]
+  /** Optional, so a caller that downloads no archive of its own need not invent one; absent is "none". */
+  notWrittenToCheckout?: UnwrittenEntry[]
+  caseCollisions?: string[][]
   startedAt: Date
   finishedAt: Date
 }): ReviewRecord => {
@@ -103,7 +122,11 @@ export const buildReviewRecord = (a: {
     checkVerdicts: a.check === null ? null : a.check.verdicts,
     recheckJudgements: a.recheck === null ? null : a.recheck.judgements,
     recheckSkipped: a.recheck?.skipped ?? null,
-    checkout: { removedCredentialFiles: [...a.removedFromCheckout] },
+    checkout: {
+      removedCredentialFiles: [...a.removedFromCheckout],
+      notWritten: (a.notWrittenToCheckout ?? []).map((e) => ({ path: e.path, code: e.code })),
+      caseCollisions: (a.caseCollisions ?? []).map((g) => [...g]),
+    },
     timings: {
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),

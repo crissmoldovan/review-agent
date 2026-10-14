@@ -1,12 +1,14 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runEngine } from './engine'
+import { runCheckPass } from './check-pass'
+import { runClaude, runEngine, SYSTEM_PROMPT_FILE_THRESHOLD } from './engine'
 import type { EngineInput } from './engine'
 import { fixturePath } from '../test/fixture'
-import { CHILD_ENV_ALLOWLIST, childEnv, gatewayBaseUrlRefusal } from './cli-process'
+import { CHILD_ENV_ALLOWLIST, childEnv } from './cli-process'
+import { gatewayBaseUrlRefusal, SecretValue, type ClaudeRuntime } from './runtime'
 import { inputFixture as baseInputFixture } from '../test/helpers/engine-input'
 
 const fakeCli = fileURLToPath(new URL('../test/fake-claude.mjs', import.meta.url))
@@ -35,6 +37,23 @@ afterEach(() => {
     delete process.env[k]
   }
 })
+
+/** Sets these variables for one case and puts back whatever was there, so a case never leaks into
+ *  the next — or into a developer's own credential, if their shell holds one. */
+const withEnv = async (vars: Record<string, string>, body: () => Promise<void>): Promise<void> => {
+  const before = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]))
+  Object.assign(process.env, vars)
+  try {
+    await body()
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  }
+}
+
+const seenEnv = (): Record<string, string> => JSON.parse(readFileSync(record, 'utf8')).env
 
 describe('runEngine — a run that completed', () => {
   beforeEach(() => { process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/success-opus-low.json') })
@@ -214,8 +233,19 @@ describe('the model credential the child may see', () => {
     // name, so "two kinds" would stop meaning what it says.
     expect(CHILD_ENV_ALLOWLIST).not.toContain('ANTHROPIC_AUTH_TOKEN')
     expect(CHILD_ENV_ALLOWLIST).not.toContain('ANTHROPIC_BASE_URL')
+    // Every Anthropic or Claude name on the list, pinned: the two credentials, and since 0.2.0 one
+    // path (spec 0.2.0 §9.3 P7). CLAUDE_CONFIG_DIR is where a relocated login lives, not a login.
     expect(CHILD_ENV_ALLOWLIST.filter((k) => k.startsWith('ANTHROPIC_') || k.startsWith('CLAUDE_')))
-      .toEqual(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'])
+      .toEqual(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR'])
+  })
+
+  it('passes the two settings a relocated or Alpine Claude Code needs, which are not secrets (P7)', async () => {
+    process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/success-opus-low.json')
+    await withEnv({ CLAUDE_CONFIG_DIR: '/srv/claude-config', USE_BUILTIN_RIPGREP: '0' }, async () => {
+      await runEngine(inputFixture())
+      expect(seenEnv().CLAUDE_CONFIG_DIR).toBe('/srv/claude-config')
+      expect(seenEnv().USE_BUILTIN_RIPGREP).toBe('0')
+    })
   })
 
   it('does not forward a base URL even when one is set in this process', () => {
@@ -266,5 +296,187 @@ describe('runEngine — abort', () => {
     const p = runEngine(inputFixture({ signal: ac.signal }))
     setTimeout(() => ac.abort(), 50)
     await expect(p).rejects.toThrow(/abort/i)
+  }, 10_000)
+})
+
+// Spec 0.2.0 §3.2: a credential passed with the review is the ONLY one the Claude process sees, so an
+// embedding service can run two reviews on two accounts in one process, and nothing ambient rides along.
+describe('runtime.credential — the given credential and no other', () => {
+  const AMBIENT_KEY = 'sk-ant-api03-AMBIENT-FAKE'
+  const AMBIENT_TOKEN = 'sk-ant-oat01-AMBIENT-FAKE'
+  const GIVEN = 'sk-ant-api03-GIVEN-FAKE'
+  beforeEach(() => { process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/success-opus-low.json') })
+
+  it('hands the child the given API key, and removes both ambient credentials', async () => {
+    await withEnv({ ANTHROPIC_API_KEY: AMBIENT_KEY, CLAUDE_CODE_OAUTH_TOKEN: AMBIENT_TOKEN }, async () => {
+      await runEngine(inputFixture({ runtime: { credential: { kind: 'api-key', value: new SecretValue(GIVEN) } } }))
+      expect(seenEnv().ANTHROPIC_API_KEY).toBe(GIVEN)
+      expect(seenEnv().CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    })
+  })
+
+  it('hands the child the given subscription token, and no API key', async () => {
+    await withEnv({ ANTHROPIC_API_KEY: AMBIENT_KEY }, async () => {
+      await runEngine(inputFixture({ runtime: { credential: { kind: 'oauth-token', value: new SecretValue(GIVEN) } } }))
+      expect(seenEnv().CLAUDE_CODE_OAUTH_TOKEN).toBe(GIVEN)
+      expect(seenEnv().ANTHROPIC_API_KEY).toBeUndefined()
+    })
+  })
+
+  it('hands the child no credential variable at all for a claude login, whatever the parent holds', async () => {
+    await withEnv({ ANTHROPIC_API_KEY: AMBIENT_KEY, CLAUDE_CODE_OAUTH_TOKEN: AMBIENT_TOKEN }, async () => {
+      await runEngine(inputFixture({ runtime: { credential: { kind: 'claude-login' } } }))
+      expect(seenEnv().ANTHROPIC_API_KEY).toBeUndefined()
+      expect(seenEnv().CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    })
+  })
+
+  it('reaches the check pass too, so every pass of one review is billed to one account', async () => {
+    process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/check-verdicts.json')
+    await withEnv({ ANTHROPIC_API_KEY: AMBIENT_KEY }, async () => {
+      await runCheckPass({
+        findings: [{
+          file: 'src/a.ts', line: 1, endLine: null, severity: 5, category: 'correctness', title: 't',
+          explanation: 'e', evidence: [], suggestion: null,
+        }],
+        input: inputFixture({ runtime: { credential: { kind: 'oauth-token', value: new SecretValue(GIVEN) } } }),
+      })
+      expect(seenEnv().CLAUDE_CODE_OAUTH_TOKEN).toBe(GIVEN)
+      expect(seenEnv().ANTHROPIC_API_KEY).toBeUndefined()
+    })
+  })
+
+  it('still refuses an ambient ANTHROPIC_BASE_URL the child would never see (decision §14.5)', async () => {
+    await withEnv({ ANTHROPIC_BASE_URL: 'https://gateway.example/v1' }, async () => {
+      const e = await runEngine(inputFixture({
+        runtime: { credential: { kind: 'api-key', value: new SecretValue(GIVEN) } },
+      })).catch((x: unknown) => x)
+      expect((e as Error).message).toMatch(/^ANTHROPIC_BASE_URL is set:/)
+      expect(existsSync(record)).toBe(false)
+    })
+  })
+})
+
+// Spec 0.2.0 §9.3 P8, decision §14.13: a deployment names further variables — a proxy, a CA bundle —
+// by name. Never by value, and never one that is a credential or decides where the code goes.
+describe('runtime.passEnv — more variables, by name, never a secret', () => {
+  beforeEach(() => { process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/success-opus-low.json') })
+
+  it('passes a named variable from this process to the child', async () => {
+    await withEnv({ HTTPS_PROXY: 'http://proxy.internal.example:3128', NODE_EXTRA_CA_CERTS: '/etc/ssl/corp.pem' }, async () => {
+      await runEngine(inputFixture({ runtime: { passEnv: ['HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS', 'NO_PROXY'] } }))
+      expect(seenEnv().HTTPS_PROXY).toBe('http://proxy.internal.example:3128')
+      expect(seenEnv().NODE_EXTRA_CA_CERTS).toBe('/etc/ssl/corp.pem')
+      // Named but unset: nothing invented.
+      expect(Object.keys(seenEnv())).not.toContain('NO_PROXY')
+    })
+  })
+
+  it.each([
+    ['a model credential', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    ['a gateway token', 'ANTHROPIC_AUTH_TOKEN'],
+    ['the App key', 'REVIEW_AGENT_APP_PRIVATE_KEY'],
+    ['the record secret', 'REVIEW_AGENT_RECORD_SECRET'],
+    ['the skills token', 'REVIEW_AGENT_SKILLS_TOKEN'],
+    ['a GitHub token', 'GITHUB_TOKEN'],
+    ['a GitHub CLI token', 'GH_TOKEN'],
+    ['the trigger.dev key', 'TRIGGER_SECRET_KEY'],
+    ['a switch to another provider', 'CLAUDE_CODE_USE_BEDROCK'],
+    ['a lower-case name', 'https_proxy'],
+  ])('refuses %s before anything is started', async (_what, name) => {
+    const e = await runEngine(inputFixture({ runtime: { passEnv: ['HTTPS_PROXY', name] } })).catch((x: unknown) => x)
+    expect((e as Error).message).toMatch(/^runtime\.passEnv names variables the Claude process may never see/)
+    // The fake CLI writes FAKE_CLAUDE_RECORD on every invocation; nothing written, nothing spawned.
+    expect(existsSync(record)).toBe(false)
+  })
+
+  it('names a refused variable, and never repeats an entry that may be a value', async () => {
+    const pasted = 'sk-ant-api03-pasted-where-a-name-belonged'
+    const e = await runEngine(inputFixture({ runtime: { passEnv: ['GITHUB_TOKEN', pasted] } })).catch((x: unknown) => x)
+    expect((e as Error).message).toContain('GITHUB_TOKEN')
+    expect((e as Error).message).toContain('1 entry that is not a variable name')
+    expect((e as Error).message).not.toContain(pasted)
+  })
+
+  it('cannot bring an ambient credential back alongside a given one', () => {
+    const runtime: ClaudeRuntime = { credential: { kind: 'claude-login' }, passEnv: ['ANTHROPIC_API_KEY'] }
+    expect(() => childEnv({}, runtime)).toThrow(/ANTHROPIC_API_KEY \(a model credential or endpoint\)/)
+  })
+})
+
+// Spec 0.2.0 §3.2: `bin` per review, in place of REVIEW_AGENT_CLAUDE_BIN, by the same rules.
+describe('runtime.bin', () => {
+  beforeEach(() => { process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/success-opus-low.json') })
+
+  it('wins over REVIEW_AGENT_CLAUDE_BIN', async () => {
+    process.env.REVIEW_AGENT_CLAUDE_BIN = join(tmpdir(), 'no-such-claude-here')
+    const r = await runEngine(inputFixture({ runtime: { bin: fakeCli } }))
+    expect(r.failure).toBeNull()
+    expect(existsSync(record)).toBe(true)
+  })
+
+  it('is refused when relative, or inside the checkout, before anything runs', async () => {
+    const relative = await runEngine(inputFixture({ runtime: { bin: 'claude' } })).catch((x: unknown) => x)
+    expect((relative as Error).message).toMatch(/^runtime\.bin must be an absolute path/)
+    const planted = await runEngine(inputFixture({ runtime: { bin: join(checkout, 'claude') } })).catch((x: unknown) => x)
+    expect((planted as Error).message).toMatch(/^runtime\.bin points inside the checkout/)
+    expect(existsSync(record)).toBe(false)
+  })
+})
+
+// Spec 0.2.0 §9.3 P3. Windows caps a command line at 32,767 characters, and the system prompt grows with
+// what a deployment and a repository add, so on Windows — and anywhere it is long — it goes in a file.
+describe('the system prompt through a file', () => {
+  beforeEach(() => { process.env.FAKE_CLAUDE_FIXTURE = fixturePath('cli/success-opus-low.json') })
+  const seen = (): { argv: string[]; systemPromptFile: { path: string; text: string; mode: number; dirMode: number } | null } =>
+    JSON.parse(readFileSync(record, 'utf8'))
+
+  it('stays on the command line when it is short and this is not Windows', async () => {
+    await runClaude(inputFixture(), { platform: 'linux' })
+    expect(seen().argv).toContain('--append-system-prompt')
+    expect(seen().argv).not.toContain('--append-system-prompt-file')
+    expect(seen().systemPromptFile).toBeNull()
+  })
+
+  it('goes in a private file on Windows, budget sentence included, and the file is gone afterwards', async () => {
+    await runClaude(inputFixture({ systemPrompt: 'You are the Acme PR reviewer.' }), { platform: 'win32' })
+    const s = seen()
+    expect(s.argv).not.toContain('--append-system-prompt')
+    expect(s.argv[s.argv.indexOf('--append-system-prompt-file') + 1]).toBe(s.systemPromptFile?.path)
+    expect(s.systemPromptFile?.text).toBe(
+      'You are the Acme PR reviewer.\n\nBudget: the budget for this review is about $2.00. ' +
+      'Read what you need and no more. If you have been exploring for a long time, stop opening ' +
+      'new files and write up the findings you can already support with evidence you have read.')
+    // Outside the checkout, where the model could otherwise be pointed at it.
+    const file = s.systemPromptFile?.path ?? ''
+    expect(file.startsWith(checkout) || file.startsWith(realpathSync(checkout))).toBe(false)
+    if (process.platform !== 'win32') {
+      expect(s.systemPromptFile?.mode).toBe(0o600)
+      expect(s.systemPromptFile?.dirMode).toBe(0o700)
+    }
+    expect(existsSync(dirname(s.systemPromptFile?.path ?? ''))).toBe(false)
+  })
+
+  it('goes in a file on any OS once it is longer than the threshold, through runEngine itself', async () => {
+    const long = 'x'.repeat(SYSTEM_PROMPT_FILE_THRESHOLD + 1)
+    await runEngine(inputFixture({ systemPrompt: long }))
+    expect(seen().argv).toContain('--append-system-prompt-file')
+    expect(seen().systemPromptFile?.text.startsWith(long)).toBe(true)
+    // And never both: a prompt passed twice would be read twice.
+    expect(seen().argv).not.toContain('--append-system-prompt')
+  })
+
+  it('is removed when the run is aborted, too', async () => {
+    process.env.FAKE_CLAUDE_SLEEP_MS = '5000'
+    const ac = new AbortController()
+    const p = runClaude(inputFixture({ signal: ac.signal }), { platform: 'win32' })
+    // The fake writes its record before it sleeps, so the file's path is known while it is running.
+    const deadline = Date.now() + 4000
+    while (!existsSync(record) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
+    const dir = dirname(seen().systemPromptFile?.path ?? '')
+    expect(existsSync(dir)).toBe(true)
+    ac.abort()
+    await expect(p).rejects.toThrow(/abort/i)
+    expect(existsSync(dir)).toBe(false)
   }, 10_000)
 })

@@ -264,6 +264,15 @@ describe('resolveSettings: skills come from the deployment only', () => {
       .toEqual([sources[1]])
   })
 
+  it('finds the short name of a Windows directory source, whose separator is a backslash', () => {
+    // Spec 0.2.0 §9.3 P12. Split on `/` alone, `C:\…\security-pass` had one segment — the whole path —
+    // so a repository on a Windows deployment could select it only by its full filesystem path.
+    const deployment = defaultDeploymentConfig()
+    deployment.skills = [{ kind: 'dir', path: 'C:\\review-agent\\skills\\security-pass' }]
+    expect(resolveSettings({ deployment, repo: { skills: ['security-pass'] }, request: request() }).skills)
+      .toEqual(deployment.skills)
+  })
+
   it('drops a source the deployment never allowed', () => {
     // Design §4.7, measured: a skill planted in the repository under review was refused. The same
     // rule at the configuration layer — a repo may choose among the deployment's sources, and can

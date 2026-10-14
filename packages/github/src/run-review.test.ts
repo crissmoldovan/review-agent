@@ -1,10 +1,10 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Octokit } from '@octokit/core'
 import {
-  defaultDeploymentConfig, REVIEW_INSTRUCTIONS_VERSION, SecretLeak,
-  type CheckVerdict, type EngineInput, type EngineResult, type Finding, type PreviousFinding,
+  defaultDeploymentConfig, REVIEW_INSTRUCTIONS_VERSION, SecretLeak, SecretValue,
+  type CheckVerdict, type ClaudeRuntime, type EngineInput, type EngineResult, type Finding, type PreviousFinding,
   type RecheckJudgement, type RecheckPassResult, type ReviewOutput, type ReviewRequest, type Usage,
 } from '@review-agent/core'
 import { describe, expect, it, vi } from 'vitest'
@@ -72,6 +72,9 @@ const RECHECKED: RecheckPassResult = {
   }, ran: false, skipped: 'nothing-to-ask',
 }
 
+/** A checkout with nothing taken out and nothing missing: the ordinary download. */
+const NOTHING_MISSING = { removed: [] as string[], notWritten: [] as { path: string; code: string }[], caseCollisions: [] as string[][] }
+
 // The identity matters, not the contents: runReview must hand the caller's client to every call it
 // makes and mint nothing of its own, because one caller holds a user token and the other an
 // installation token.
@@ -93,7 +96,7 @@ const deps = (over: Partial<RunReviewDeps> = {}): Harness => {
     skillCacheDir: vi.fn(() => '/tmp/ra-fake-skill-cache'),
     fetchPullRequest: vi.fn(async () => PR),
     fetchRepoConfig: vi.fn(async () => null),
-    downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, removed: [] as string[] })),
+    downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, ...NOTHING_MISSING })),
     materialiseSkills: vi.fn(async () => []),
     runEngine: vi.fn(async () => RESULT),
     runCheckPass: vi.fn(async () => ({ verdicts: [] as CheckVerdict[], usage: CHECK_USAGE })),
@@ -358,7 +361,7 @@ describe('runReview: the reviewed repository’s own file', () => {
 describe('runReview: what it says while a person waits', () => {
   it('says what the deployment refused and what was taken out of the checkout, before the engine starts', async () => {
     const d = deps({
-      downloadArchive: vi.fn(async (x: { destDir: string }) => ({ dir: x.destDir, removed: ['.npmrc'] })),
+      downloadArchive: vi.fn(async (x: { destDir: string }) => ({ dir: x.destDir, ...NOTHING_MISSING, removed: ['.npmrc'] })),
       runEngine: vi.fn(async () => { throw new Error('the engine started before the notes were written') }),
     })
     // $25 on a $3 tier, so resolveSettings drops budgetUsd and the run has something to say.
@@ -374,7 +377,7 @@ describe('runReview: what it says while a person waits', () => {
     // later wonders why the review never mentioned a .npmrc should find out from this line.
     const d = deps({
       downloadArchive: vi.fn(async (x: { destDir: string }) => (
-        { dir: x.destDir, removed: ['.npmrc', 'apps/web/.env.local'] }
+        { dir: x.destDir, ...NOTHING_MISSING, removed: ['.npmrc', 'apps/web/.env.local'] }
       )),
     })
     const out = await run(d)
@@ -388,6 +391,92 @@ describe('runReview: what it says while a person waits', () => {
     const d = deps()
     await run(d)
     expect(d.notes).toEqual([])
+  })
+
+  // Spec 0.2.0 §9.3 P10: what went missing by accident is said as plainly as what was removed on purpose.
+  it('says which entries were not written and which paths collided, and puts both on the record', async () => {
+    const d = deps({
+      downloadArchive: vi.fn(async (x: { destDir: string }) => ({
+        dir: x.destDir, ...NOTHING_MISSING,
+        notWritten: [{ path: 'docs/CON', code: 'EINVAL' }],
+        caseCollisions: [['README.md', 'Readme.md']],
+      })),
+    })
+    const out = await run(d)
+    expect(d.notes).toEqual([
+      '1 archive entry could not be written to the checkout, so the review cannot read it: docs/CON (EINVAL)',
+      '1 set of paths differ only by letter case or Unicode form; where the filesystem ignores that, each was one file in the checkout: README.md / Readme.md',
+    ])
+    expect(out.record.checkout.notWritten).toEqual([{ path: 'docs/CON', code: 'EINVAL' }])
+    expect(out.record.checkout.caseCollisions).toEqual([['README.md', 'Readme.md']])
+  })
+
+  it('names ten entries in a note and counts the rest, which are all on the record', async () => {
+    const many = Array.from({ length: 13 }, (_, i) => ({ path: `bin/link-${i}`, code: 'EPERM' }))
+    const d = deps({
+      downloadArchive: vi.fn(async (x: { destDir: string }) => ({ dir: x.destDir, ...NOTHING_MISSING, notWritten: many })),
+    })
+    const out = await run(d)
+    expect(d.notes[0]).toMatch(/^13 archive entries could not be written .*bin\/link-9 \(EPERM\) and 3 more$/)
+    expect(out.record.checkout.notWritten).toHaveLength(13)
+  })
+})
+
+// Spec 0.2.0 §9.3 P11: a finding's `file` is a repository path, whoever the model is and wherever it ran.
+describe('runReview: finding paths as the repository writes them', () => {
+  const withFiles = (...files: string[]): EngineResult => ({
+    ...RESULT, output: { ...OUTPUT, findings: files.map((file) => ({ ...FINDING, file })) },
+  })
+  const filesOf = (out: Awaited<ReturnType<typeof run>>): string[] =>
+    (out.record.output?.findings ?? []).map((f) => f.file)
+
+  it('turns backslashes into slashes and drops a leading ./', async () => {
+    const d = deps({ runEngine: vi.fn(async () => withFiles('src\\cache\\lru.ts', './src/a.ts', '.\\src\\b.ts', 'src/c.ts')) })
+    expect(filesOf(await run(d))).toEqual(['src/cache/lru.ts', 'src/a.ts', 'src/b.ts', 'src/c.ts'])
+  })
+
+  it('makes an absolute path under the checkout relative, however the checkout is spelled', async () => {
+    // A real directory, so its resolved spelling can differ: macOS's temp directory is a symlink, and
+    // the model's working directory — so the paths it quotes — is the resolved one.
+    const dir = mkdtempSync(join(tmpdir(), 'ra-paths-'))
+    const d = deps({
+      makeCheckoutDir: vi.fn(async () => dir),
+      runEngine: vi.fn(async () => withFiles(`${dir}/src/a.ts`, `${realpathSync(dir)}/src/b.ts`)),
+    })
+    expect(filesOf(await run(d))).toEqual(['src/a.ts', 'src/b.ts'])
+  })
+
+  it('leaves a path outside the checkout as it is, for anchoring to drop', async () => {
+    const d = deps({ runEngine: vi.fn(async () => withFiles('/etc/passwd', '../outside.ts', 'C:\\Windows\\win.ini')) })
+    expect(filesOf(await run(d))).toEqual(['/etc/passwd', '../outside.ts', 'C:/Windows/win.ini'])
+  })
+
+  it('does it before the check pass is asked, so the pass reads the paths that will be posted', async () => {
+    const d = deps({ runEngine: vi.fn(async () => withFiles('src\\a.ts')) })
+    await run(d, { check: true })
+    expect(vi.mocked(d.runCheckPass).mock.calls[0][0].findings.map((f) => f.file)).toEqual(['src/a.ts'])
+  })
+})
+
+// Spec 0.2.0 §3.2: the runtime travels with the review into every pass.
+describe('runReview: the runtime', () => {
+  it('puts the caller’s runtime on the engine input, which every pass is built from', async () => {
+    const runtime: ClaudeRuntime = {
+      credential: { kind: 'api-key', value: new SecretValue('sk-ant-api03-FAKE') }, bin: '/opt/claude/claude',
+    }
+    const d = deps()
+    await runReview({
+      octokit: OCTOKIT, owner: 'acme', repo: 'widgets', number: 16,
+      deployment: defaultDeploymentConfig(), ask: { check: true }, deps: d, runtime,
+    })
+    expect(vi.mocked(d.runEngine).mock.calls[0][0].runtime).toBe(runtime)
+    expect(vi.mocked(d.runCheckPass).mock.calls[0][0].input.runtime).toBe(runtime)
+  })
+
+  it('leaves it off when the caller gives none, so the environment decides as before', async () => {
+    const d = deps()
+    await run(d)
+    expect(vi.mocked(d.runEngine).mock.calls[0][0].runtime).toBeUndefined()
   })
 })
 

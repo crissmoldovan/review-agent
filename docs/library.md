@@ -98,9 +98,9 @@ The package root adds the App's identity and registration, which **must not** be
 
 | Area | Main exports |
 |---|---|
-| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, deps })` — read the pull request, download, review, check, re-check; **posts nothing** |
+| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with |
 | Posting it | `publishReview(…)` — the summary, inline comments, edits to earlier comments and the marker |
-| Reading GitHub | `fetchPullRequest`, `downloadArchive` (with `sanitiseCheckout` and `isCredentialPath`), `fetchRepoConfig` / `parseRepoConfig` / `REPO_CONFIG_PATH`, `fetchThreadReplies` |
+| Reading GitHub | `fetchPullRequest`, `downloadArchive` (with `sanitiseCheckout`, `isCredentialPath` and `pathCollisions`; it also returns the entries it could not write), `fetchRepoConfig` / `parseRepoConfig` / `REPO_CONFIG_PATH`, `fetchThreadReplies` |
 | Deciding what to say | `anchorFindings`, `selectForPosting` |
 | The check run | `createCheckRun`, `completeCheckRun`, `closeCheckRunIfInProgress`, `closeStaleCheckRuns`, `conclusionFor`, `checkRunOutput`, `annotationsFor`, `RERUN_ACTION` |
 | The marker | `encodeMarker`, `decodeMarker`, `findSummaryComment`, `upsertSummaryComment`, `recheckQuestions`, `nextMarkerState`, `applyOutcomes` |
@@ -114,13 +114,37 @@ The package root adds the App's identity and registration, which **must not** be
 |---|---|
 | Settings | `DeploymentConfig`, `defaultDeploymentConfig()`, `RepoConfig`, `ReviewRequest`, `resolveSettings(…)`, `ResolvedSettings`, `Tier`, `Effort`, `ReportMode`, `SkillSource`, `writesSummaryComment(mode)`, `skillSourceId` |
 | Budgets | `budgetFor(tierSettings, requestBudgetUsd?)`, `BudgetPolicy`, `roundUsd` |
-| The engine | `runEngine(input)`, `buildArgv(…)`, `EngineResult`, `EngineFailure`, `Usage`, `gatewayBaseUrlRefusal(env)` |
+| The engine | `runEngine(input)`, `buildArgv(…)`, `EngineInput`, `EngineResult`, `EngineFailure`, `Usage` |
+| Credentials | `modelCredentialFromEnv(env, { allowLogin })`, `ModelCredential`, `ClaudeRuntime`, `SecretValue`, `MODEL_CREDENTIAL_VARS`, `gatewayBaseUrlRefusal(env)` |
 | Prompts | `reviewSystemPrompt`, `checkPassSystemPrompt`, `recheckPassSystemPrompt`, `buildPrompt`, `REVIEW_INSTRUCTIONS_VERSION`, `REVIEW_INSTRUCTIONS_DIGEST`, `REVIEW_LENSES` |
 | Findings | `Finding`, `ReviewOutput`, `parseReviewOutput`, `reviewJsonSchema`, `ParseError` |
 | The passes | `runCheckPass`, `CheckVerdict`; `runRecheckPass`, `RecheckJudgement`, `PreviousFinding` |
-| The record | `buildReviewRecord`, `ReviewRecord`, `RECORD_VERSION`, `ENGINE_VERSION` |
+| The record | `buildReviewRecord`, `ReviewRecord`, `UnwrittenEntry`, `RECORD_VERSION`, `ENGINE_VERSION` |
 | Secrets | `scanForSecrets`, `assertNoSecrets`, `SecretLeak` |
-| Skills | `materialiseSkills`, `SkillError` |
+| Skills | `materialiseSkills`, `defaultSkillCacheDir()`, `SkillError` |
+
+### Passing a credential
+
+By default the Claude process takes its model credential from this process's environment: exactly one of
+`ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`. A service that runs reviews for several accounts passes one with
+each review instead, and that review's Claude process then sees that credential and no other:
+
+```ts
+import { modelCredentialFromEnv, SecretValue, type ClaudeRuntime } from '@review-agent/core'
+
+const runtime: ClaudeRuntime = {
+  credential: { kind: 'api-key', value: new SecretValue(apiKeyForThisReview) },
+  bin: '/opt/claude-code/bin/claude',   // optional: absolute, and never inside the checkout
+  passEnv: ['HTTPS_PROXY', 'NO_PROXY'],  // optional: more variables, by name
+}
+// Or the environment's rule, as the runner applies it: exactly one credential, no ANTHROPIC_BASE_URL.
+const fromEnv: ClaudeRuntime = { credential: modelCredentialFromEnv(process.env, { allowLogin: false }) }
+```
+
+A `SecretValue` prints `[redacted]` through `String()`, `JSON.stringify` and `console.log`; `reveal()` is the only way
+to read it. `passEnv` refuses any `ANTHROPIC_*` name, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`, any
+`REVIEW_AGENT_*` name, `GITHUB_TOKEN`, `GH_TOKEN` and `TRIGGER_SECRET_KEY`. `ANTHROPIC_BASE_URL` set in this process
+refuses every review, credential or not.
 
 ## Versioning
 

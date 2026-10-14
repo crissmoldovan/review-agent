@@ -190,11 +190,27 @@ describe('buildReviewRecord — the name of the check run this review wrote', ()
 describe('buildReviewRecord — what was removed from the checkout before the review', () => {
   it('names the credential files the review never saw', () => {
     expect(record({ removedFromCheckout: ['.npmrc', 'apps/web/.env.local'] }).checkout)
-      .toEqual({ removedCredentialFiles: ['.npmrc', 'apps/web/.env.local'] })
+      .toEqual({ removedCredentialFiles: ['.npmrc', 'apps/web/.env.local'], notWritten: [], caseCollisions: [] })
   })
 
   it('records an empty list rather than omitting the field', () => {
-    expect(record().checkout).toEqual({ removedCredentialFiles: [] })
+    expect(record().checkout).toEqual({ removedCredentialFiles: [], notWritten: [], caseCollisions: [] })
+  })
+
+  // Spec 0.2.0 §9.3 P10: an entry the extraction could not write was missing in silence, and two paths
+  // one filesystem cannot tell apart left one file where the archive had two. Both are named now,
+  // and RECORD_VERSION stays 1: the fields are new, nothing old changed meaning.
+  it('names what was not written, and which paths collided by case', () => {
+    const r = record({
+      notWrittenToCheckout: [{ path: 'docs/CON', code: 'EINVAL' }],
+      caseCollisions: [['README.md', 'Readme.md']],
+    })
+    expect(r.recordVersion).toBe(1)
+    expect(r.checkout).toEqual({
+      removedCredentialFiles: [],
+      notWritten: [{ path: 'docs/CON', code: 'EINVAL' }],
+      caseCollisions: [['README.md', 'Readme.md']],
+    })
   })
 })
 

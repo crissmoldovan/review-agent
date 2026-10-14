@@ -843,6 +843,25 @@ describe('publishReview: what the gate and the summary are handed (Criss, decisi
     expect(body).toContain('`--multi` — the multi-reviewer fan-out is not built yet')
   })
 
+  // Spec 0.2.0 §9.3 P10: read off the record, so the summary says what the record says.
+  it('names in the summary what was not in the checkout, from the record', async () => {
+    const review = reviewed()
+    const record = {
+      ...review.record,
+      checkout: {
+        ...review.record.checkout,
+        notWritten: [{ path: 'docs/aux.md', code: 'EINVAL' }],
+        caseCollisions: [['LICENSE', 'License']],
+      },
+    }
+    const gh = fakeGitHub()
+    await publish(gh.octokit, { ...review, record })
+    const body = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
+    expect(body).toContain('#### Not in the checkout')
+    expect(body).toContain('`docs/aux.md` could not be written (`EINVAL`)')
+    expect(body).toContain('`LICENSE`, `License` differ only by letter case')
+  })
+
   it('names what the resolver dropped as well, from the settings it recorded', async () => {
     const review = reviewed()
     const gh = fakeGitHub()

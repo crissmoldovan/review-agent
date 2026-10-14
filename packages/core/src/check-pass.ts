@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { budgetFor } from './budget'
-import { parseUsage, spawnClaude } from './cli-process'
-import { buildArgv, type EngineInput, type Usage } from './engine'
+import { parseUsage } from './cli-process'
+import { runClaude, type EngineInput, type Usage } from './engine'
 import type { Finding, Severity } from './findings'
 import { checkPassSystemPrompt } from './prompt'
 
@@ -81,13 +81,11 @@ export const runCheckPass = async (a: {
     settings: { ...a.input.settings, budget },
   }
 
-  // buildArgv, not a second flag list: the check reads the same PR-authored code, so it gets the
-  // same lock-down, the same tool set and the same skills, by construction rather than by
-  // remembering to. It also inherits the budget sentence (Task 7) — with this pass's own smaller
-  // target in it. This pass's guard is its own ceiling.
-  const run = await spawnClaude({
-    argv: buildArgv(input), prompt: input.prompt, cwd: input.checkoutDir, signal: input.signal,
-  })
+  // runClaude, not a second spawn: the check reads the same PR-authored code, so it gets the same
+  // lock-down, the same tool set, the same skills and the same runtime (`buildArgv`, and the review's
+  // credential), by construction rather than by remembering to. It also inherits the budget sentence
+  // (Task 7) — with this pass's own smaller target in it. This pass's guard is its own ceiling.
+  const run = await runClaude(input)
   const envelope = (run.envelope ?? {}) as Record<string, unknown>
   const parsed = verdictsSchema.safeParse(envelope.structured_output ?? {})
   const raw = parsed.success ? parsed.data.verdicts : []

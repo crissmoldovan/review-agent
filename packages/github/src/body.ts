@@ -1,4 +1,4 @@
-import type { Finding, Inconclusive, IntentVerdict, Tier } from '@review-agent/core'
+import type { Finding, Inconclusive, IntentVerdict, Tier, UnwrittenEntry } from '@review-agent/core'
 import { encodeMarker, type MarkerState } from './marker'
 
 /** The info string on a suggested-change fence. **NOT VERIFIED against GitHub's documentation**
@@ -77,6 +77,32 @@ export type SummaryInput = {
    *  `resolveSettings`, so it can never land in `droppedRequestKeys`, and a refusal nobody can see
    *  is indistinguishable from a bug. Empty on the ordinary path. */
   refused: string[]
+  /** What the reviewer could not read because it was not in the checkout as the pull request has it —
+   *  the record's `checkout.notWritten` and `checkout.caseCollisions` (spec 0.2.0 §9.3 P10). Empty on
+   *  the ordinary path. */
+  checkoutGaps: { notWritten: UnwrittenEntry[]; caseCollisions: string[][] }
+}
+
+/** The most lines "Not in the checkout" prints before it says how many more there are. A pull request
+ *  that adds a thousand files Windows cannot write is one sentence of news, not a thousand lines; the
+ *  record keeps them all. */
+export const MAX_CHECKOUT_GAP_LINES = 20
+
+/** Every path here is a name from the pull request's own archive, so every one goes through
+ *  `inlineCode`: a file name is text this product did not write, and a backtick in one must not close
+ *  the span it sits in. */
+const checkoutGapLines = (gaps: SummaryInput['checkoutGaps']): string[] => {
+  const lines = [
+    ...gaps.notWritten.map((e) => `- ${inlineCode(e.path)} could not be written (${inlineCode(e.code)})`),
+    ...gaps.caseCollisions.map((g) =>
+      `- ${g.map(inlineCode).join(', ')} differ only by letter case or Unicode form; where the filesystem ` +
+      'ignores that, they were one file, and only the last of them was there to read'),
+  ]
+  if (lines.length <= MAX_CHECKOUT_GAP_LINES) return lines
+  return [
+    ...lines.slice(0, MAX_CHECKOUT_GAP_LINES),
+    `- and ${lines.length - MAX_CHECKOUT_GAP_LINES} more, listed on the review record`,
+  ]
 }
 
 /** Design §5: one summary comment naming the commit reviewed, the tier and model, the cost, and any
@@ -107,6 +133,15 @@ export const summaryBody = (a: SummaryInput): string => {
     for (const i of a.inconclusive) {
       lines.push(`- ${i.question} — would be settled by: ${i.whatWouldSettleIt}`)
     }
+  }
+  // Spec 0.2.0 §9.3 P10: a file the reviewer never saw is a file it said nothing about, and a reader
+  // who does not know that reads the silence as "fine". Said where the reader already is.
+  const gaps = checkoutGapLines(a.checkoutGaps)
+  if (gaps.length > 0) {
+    lines.push('', '#### Not in the checkout', '',
+      'Some of the repository\'s files at this commit were not in the copy the reviewer read, ' +
+      'so it could not have read them:', '',
+      ...gaps)
   }
   // Criss, 2026-09-14 (decision 4): what was asked for and not done is said out loud, in the place
   // the requester is already reading. The sentences arrive phrased, because the half that knows WHY

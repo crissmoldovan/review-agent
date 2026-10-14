@@ -1,7 +1,9 @@
 import {
   createReadStream,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -12,7 +14,7 @@ import { join, resolve } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { beforeEach, describe, expect, it } from 'vitest'
 import * as tar from 'tar'
-import { materialiseSkills, SkillError } from './skills'
+import { defaultSkillCacheDir, materialiseSkills, SkillError } from './skills'
 import { buildArgv } from './engine'
 import { inputFixture } from '../test/helpers/engine-input'
 
@@ -163,6 +165,99 @@ describe('materialiseSkills — git sources', () => {
         fetch: async () => createReadStream(tgz),
       }),
     ).rejects.toThrow(/escapes the skill source/)
+  })
+})
+
+// Spec 0.2.0 §9.3 P13: a cache of instructions the reviewer follows is only as trustworthy as whoever
+// could write into it.
+describe('materialiseSkills — the cache belongs to this user, and only exists when it is used', () => {
+  it('creates nothing, and refuses nothing, when no skill is configured', async () => {
+    const unused = join(root, 'never', 'made')
+    expect(await materialiseSkills([], unused)).toEqual([])
+    expect(existsSync(join(root, 'never'))).toBe(false)
+    // Not even a cache path that would be refused if it were used: the CLI's every review has no
+    // skills, and must not fail over a setting it does not need.
+    expect(await materialiseSkills([], 'relative/cache')).toEqual([])
+  })
+
+  it.skipIf(process.platform === 'win32')('creates the cache directory 0700', async () => {
+    const tgz = await recordArchive()
+    const fresh = join(root, 'fresh', 'skills')
+    await materialiseSkills([gitSource], fresh, { fetch: async () => createReadStream(tgz) })
+    expect(statSync(fresh).mode & 0o777).toBe(0o700)
+    expect(statSync(join(root, 'fresh')).mode & 0o777).toBe(0o700)
+  })
+
+  it('refuses a cache entry another user owns, even one named exactly as this one would be', async () => {
+    const tgz = await recordArchive()
+    // Put a real entry there first, then look at it as somebody else would own it: no test can make
+    // a file another user owns without being root, so ownership is the seam.
+    const [made] = await materialiseSkills([gitSource], cacheDir, { fetch: async () => createReadStream(tgz) })
+    const me = 1000
+    const ownership = { uid: me, ownerOf: (p: string) => (p === made.path ? me + 1 : me) }
+    await expect(materialiseSkills([gitSource], cacheDir, { ownership, fetch: async () => createReadStream(tgz) }))
+      .rejects.toThrow(/belongs to another user; refusing to use it/)
+  })
+
+  it('refuses a cache directory another user owns, before reading anything in it', async () => {
+    let fetched = 0
+    const ownership = { uid: 1000, ownerOf: () => 1001 }
+    await expect(materialiseSkills([gitSource], cacheDir, {
+      ownership, fetch: async () => { fetched += 1; throw new Error('must not fetch') },
+    })).rejects.toThrow(/skill cache dir .* belongs to another user/)
+    expect(fetched).toBe(0)
+  })
+
+  it('checks nothing where a uid means nothing', async () => {
+    const tgz = await recordArchive()
+    const ownership = { uid: null, ownerOf: () => { throw new Error('not asked on Windows') } }
+    const [only] = await materialiseSkills([gitSource], cacheDir, { ownership, fetch: async () => createReadStream(tgz) })
+    expect(only.id).toBe('crissmoldovan/review-skills@v0.3.0')
+  })
+
+  // The race: two reviews fetch the same repo@ref, the other one renames its copy into place first,
+  // and this one's rename fails. Its staging directory is already frozen read-only by then.
+  it('loses a race cleanly: uses the winner’s copy and leaves no staging directory behind', async () => {
+    const tgz = await recordArchive()
+    const [winner] = await materialiseSkills([gitSource], join(root, 'elsewhere'), {
+      fetch: async () => createReadStream(tgz),
+    })
+    const entry = join(realpathSync(cacheDir), winner.path.slice(winner.path.lastIndexOf('/') + 1))
+    const out = await materialiseSkills([gitSource], cacheDir, {
+      fetch: async () => {
+        // The other run finishes between this one's check and its rename.
+        mkdirSync(join(entry, '.claude-plugin'), { recursive: true })
+        writeFileSync(join(entry, '.claude-plugin', 'plugin.json'), '{"name":"the-winner"}')
+        return createReadStream(tgz)
+      },
+    })
+    expect(out[0].path).toBe(entry)
+    expect(readFileSync(join(entry, '.claude-plugin', 'plugin.json'), 'utf8')).toBe('{"name":"the-winner"}')
+    expect(readdirSync(cacheDir).filter((n) => n.startsWith('.staging-'))).toEqual([])
+  })
+})
+
+describe('defaultSkillCacheDir — this OS’s own place for a user’s caches', () => {
+  it('is under LOCALAPPDATA on Windows', () => {
+    expect(defaultSkillCacheDir({ platform: 'win32', homedir: 'C:\\Users\\dev', env: { LOCALAPPDATA: 'C:\\Users\\dev\\AppData\\Local' } }))
+      .toBe('C:\\Users\\dev\\AppData\\Local\\review-agent\\skills')
+    // Not set: where Windows keeps it anyway.
+    expect(defaultSkillCacheDir({ platform: 'win32', homedir: 'C:\\Users\\dev', env: {} }))
+      .toBe('C:\\Users\\dev\\AppData\\Local\\review-agent\\skills')
+  })
+
+  it('is under ~/Library/Caches on macOS', () => {
+    expect(defaultSkillCacheDir({ platform: 'darwin', homedir: '/Users/dev', env: { XDG_CACHE_HOME: '/elsewhere' } }))
+      .toBe('/Users/dev/Library/Caches/review-agent/skills')
+  })
+
+  it('is under XDG_CACHE_HOME on Linux, else ~/.cache, and ignores a relative XDG_CACHE_HOME', () => {
+    expect(defaultSkillCacheDir({ platform: 'linux', homedir: '/home/dev', env: { XDG_CACHE_HOME: '/var/cache/dev' } }))
+      .toBe('/var/cache/dev/review-agent/skills')
+    expect(defaultSkillCacheDir({ platform: 'linux', homedir: '/home/dev', env: {} }))
+      .toBe('/home/dev/.cache/review-agent/skills')
+    expect(defaultSkillCacheDir({ platform: 'linux', homedir: '/home/dev', env: { XDG_CACHE_HOME: 'cache' } }))
+      .toBe('/home/dev/.cache/review-agent/skills')
   })
 })
 

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { budgetFor } from './budget'
-import { parseUsage, spawnClaude } from './cli-process'
-import { buildArgv, type EngineInput, type Usage } from './engine'
+import { parseUsage } from './cli-process'
+import { runClaude, type EngineInput, type Usage } from './engine'
 import type { Severity } from './findings'
 import { recheckPassSystemPrompt } from './prompt'
 import { scanForSecrets } from './secrets'
@@ -290,15 +290,13 @@ export const runRecheckPass = async (a: {
     settings: { ...a.input.settings, budget },
   }
 
-  // buildArgv, not a second flag list — the same reason as the check pass: this pass reads the same
-  // PR-authored code, so it gets the same lock-down, the same three read-only tools and the same
-  // skills by construction rather than by remembering to. Its own `--max-budget-usd` is the ceiling
-  // derived above, and its own budget sentence carries this pass's smaller target.
+  // runClaude, not a second spawn — the same reason as the check pass: this pass reads the same
+  // PR-authored code, so it gets the same lock-down, the same three read-only tools, the same skills
+  // and the same runtime by construction rather than by remembering to. Its own `--max-budget-usd`
+  // is the ceiling derived above, and its own budget sentence carries this pass's smaller target.
   let run
   try {
-    run = await spawnClaude({
-      argv: buildArgv(input), prompt: input.prompt, cwd: input.checkoutDir, signal: input.signal,
-    })
+    run = await runClaude(input)
   } catch {
     // A gateway refusal, an ENOENT, an abort from the deadline or a cancellation. Nothing is claimed
     // about any finding.

@@ -1,6 +1,6 @@
 import type { Octokit } from '@octokit/core'
 import {
-  gatewayBaseUrlRefusal, resolveSettings, scanForSecrets, SecretLeak,
+  modelCredentialFromEnv, resolveSettings, scanForSecrets, SecretLeak,
   type DeploymentConfig, type ReviewRecord, type ReviewRequest,
 } from '@review-agent/core'
 import {
@@ -155,10 +155,10 @@ export class DoNotRetry extends Error {
  *  No `spentUsd`: nothing was spent, which is the whole reason it exists. */
 export class RetryThis extends Error {}
 
-/** The two variables that are a model credential (Criss, 2026-09-14, decision 10): an Anthropic API
- *  key, or a subscription token from `claude setup-token`. There is no third kind — the gateway pair
- *  is refused, and Task 0 took both of its names out of `CHILD_ENV_ALLOWLIST`. */
-export const MODEL_CREDENTIAL_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'] as const
+/** The two variables that are a model credential (Criss, 2026-09-14, decision 10). Core's since 0.2.0,
+ *  where the rules that read them live; re-exported here for the record callback and the end-to-end
+ *  gate, which import it from the runner. */
+export { MODEL_CREDENTIAL_VARS } from '@review-agent/core'
 
 /** Criss, 2026-09-14: exactly two credential kinds, and the deployment chooses — an Anthropic API key
  *  or a subscription token from `claude setup-token`. `CHILD_ENV_ALLOWLIST` passes exactly these two
@@ -170,23 +170,13 @@ export const MODEL_CREDENTIAL_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TO
  *  review-task.ts, where a check would run wherever the file is imported (Step 58).
  *  Exactly one, not at-least-one: two credentials means nobody can say which one a review was
  *  billed to, and this repository does not leave money ambiguous.
- *  NEVER prints a value. The names are enough to fix the deployment. */
+ *  NEVER prints a value. The names are enough to fix the deployment.
+ *
+ *  The rules themselves are core's since 0.2.0 (`modelCredentialFromEnv`, spec 0.2.0 §3.1), because
+ *  the CLI and the SDK apply the same ones; this is the runner asking them with no `claude login`
+ *  allowed — a login on a server is somebody's personal account paying for everybody's reviews. */
 export const assertModelCredential = (env: Record<string, string | undefined>): void => {
-  // Decision 10: checked first, and by name only. The rule and its sentence are core's (Task 0),
-  // because spawnClaude and `review-agent review` refuse on it too; this is the same rule asked
-  // before the first GitHub call, not a second copy of it.
-  const gateway = gatewayBaseUrlRefusal(env)
-  if (gateway !== null) throw new Error(gateway)
-  const set = MODEL_CREDENTIAL_VARS.filter((k) => (env[k] ?? '') !== '')
-  if (set.length === 1) return
-  throw new Error(
-    set.length === 0
-      ? 'no model credential: set exactly one of ANTHROPIC_API_KEY (an Anthropic API key) or ' +
-        'CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, a Claude subscription). ' +
-        'No review can run without one.'
-      : `${set.length} model credentials are set (${set.join(', ')}); set exactly one, so that ` +
-        'what a review costs is billed somewhere a person can name.',
-  )
+  modelCredentialFromEnv(env, { allowLogin: false })
 }
 
 const splitRepo = (full: string): { owner: string; repo: string } => {

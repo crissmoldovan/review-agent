@@ -4,6 +4,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import type { Octokit } from '@octokit/core'
+import type { UnwrittenEntry } from '@review-agent/core'
 import { extract } from 'tar'
 
 // ── CREDENTIAL FILES ARE REMOVED, NOT JUDGED ─────────────────────────────────────────────────────
@@ -91,9 +92,50 @@ export async function sanitiseCheckout(dir: string): Promise<SanitisedCheckout> 
   return { gitDirs, removed }
 }
 
+/** An archive entry's path as the repository writes it: GitHub wraps every archive in one top-level
+ *  `<owner>-<repo>-<sha>/` directory, which extraction strips (`strip: 1`), and a directory entry ends
+ *  in `/`. */
+const repositoryPathOf = (entryPath: string): string =>
+  entryPath.replace(/\\/g, '/').split('/').slice(1).join('/').replace(/\/+$/, '')
+
+/** Groups of paths that are one file wherever letter case or Unicode normalisation is ignored (spec
+ *  0.2.0 §9.3 P10): `README.md` and `Readme.md`, or `café` written precomposed and decomposed. macOS
+ *  ignores both by default and Windows ignores case, so there each group was ONE file in the checkout,
+ *  holding whichever was extracted last, and the reviewer read it as if it were all of them. Computed
+ *  from the archive's own list, not from the disk, so it is the same answer on every OS. Each group
+ *  sorted, and the groups in order of their first path, so the record reads the same twice. */
+export function pathCollisions(paths: readonly string[]): string[][] {
+  const fold = (p: string): string => p.normalize('NFC').toLowerCase().normalize('NFC')
+  const groups = new Map<string, Set<string>>()
+  for (const p of paths) {
+    if (p === '') continue
+    const key = fold(p)
+    const group = groups.get(key) ?? new Set<string>()
+    group.add(p)
+    groups.set(key, group)
+  }
+  const byCodeUnit = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0)
+  return [...groups.values()]
+    .filter((g) => g.size > 1)
+    .map((g) => [...g].sort(byCodeUnit))
+    .sort((x, y) => byCodeUnit(x[0] ?? '', y[0] ?? ''))
+}
+
+export type DownloadedCheckout = {
+  dir: string
+  /** Credential files deleted before the model could read them (`sanitiseCheckout`). */
+  removed: string[]
+  /** Entries the extraction did not write (spec 0.2.0 §9.3 P10). On Linux, where the runner runs,
+   *  this is almost always empty; on Windows a name like `CON` or `a*b`, or a symlink without
+   *  Developer Mode, lands here instead of vanishing. */
+  notWritten: UnwrittenEntry[]
+  /** `pathCollisions` over every entry the archive carried. */
+  caseCollisions: string[][]
+}
+
 export async function downloadArchive(a: {
   octokit: Octokit; owner: string; repo: string; ref: string; destDir: string
-}): Promise<{ dir: string; removed: string[] }> {
+}): Promise<DownloadedCheckout> {
   const { octokit, owner, repo, ref, destDir } = a
   // Octokit throws only at status >= 400, so the documented 302 arrives as a normal response.
   const res = await octokit.request('GET /repos/{owner}/{repo}/tarball/{ref}', {
@@ -114,11 +156,46 @@ export async function downloadArchive(a: {
   }
 
   await mkdir(destDir, { recursive: true })
-  await pipeline(source, extract({ cwd: destDir, strip: 1, filter: safeEntry }))
+
+  // node-tar does not stop on an entry it cannot write: it warns and goes on, and with no `onwarn`
+  // the warning went nowhere — so a file the filesystem refused was simply not in the checkout, and
+  // nothing said so (spec 0.2.0 §9.3 P10). Every warning but TAR_ENTRY_INFO means an entry was
+  // skipped or failed. The path is the one the archive gave, remembered when the entry was first
+  // seen: by the time a write fails node-tar has stripped it, and on Windows re-encoded characters
+  // in it that Windows cannot hold.
+  const notWritten: UnwrittenEntry[] = []
+  const seen = new WeakMap<object, string>()
+  const entryPaths: string[] = []
+  const said = new Set<string>()
+  const notWrittenOnce = (path: string, code: string): void => {
+    const key = `${code}\0${path}`
+    if (said.has(key)) return
+    said.add(key)
+    notWritten.push({ path, code })
+  }
+  await pipeline(source, extract({
+    cwd: destDir,
+    strip: 1,
+    filter: (path, entry) => {
+      const repositoryPath = repositoryPathOf(path)
+      if (!safeEntry(path)) { notWrittenOnce(repositoryPath, 'UNSAFE_PATH'); return false }
+      seen.set(entry, repositoryPath)
+      entryPaths.push(repositoryPath)
+      return true
+    },
+    onwarn: (code, _message, data) => {
+      if (code === 'TAR_ENTRY_INFO') return
+      const entry = data.entry
+      const header = data.header as { path?: unknown } | undefined
+      const path = (typeof entry === 'object' && entry !== null ? seen.get(entry) : undefined)
+        ?? (typeof header?.path === 'string' ? repositoryPathOf(header.path) : '(an entry with no readable path)')
+      notWrittenOnce(path, typeof data.code === 'string' && data.code !== '' ? data.code : code)
+    },
+  }))
 
   const { gitDirs, removed } = await sanitiseCheckout(destDir)
   if (gitDirs.length > 0) {
     throw new Error(`archive carried a .git directory, which an archive never should: ${gitDirs.join(', ')}`)
   }
-  return { dir: destDir, removed }
+  return { dir: destDir, removed, notWritten, caseCollisions: pathCollisions(entryPaths) }
 }

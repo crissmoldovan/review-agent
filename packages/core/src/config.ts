@@ -156,10 +156,11 @@ export const skillSourceId = (s: SkillSource): string =>
 
 /** The last path segment of an id, so a repo can write "security-pass" rather than a full
  *  filesystem path. Ambiguous when two sources end in the same segment; a deployment that allows
- *  two such sources has named them badly. */
+ *  two such sources has named them badly. Split on either separator (spec 0.2.0 §9.3 P12): a `dir`
+ *  source on Windows is `C:\skills\security-pass`, whose short name is still `security-pass`. */
 const shortSkillName = (id: string): string => {
   const head = id.split(/[@#]/)[0] ?? id
-  const segments = head.split('/').filter((p) => p.length > 0)
+  const segments = head.split(/[\\/]/).filter((p) => p.length > 0)
   return segments[segments.length - 1] ?? id
 }
 

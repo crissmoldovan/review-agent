@@ -35,13 +35,23 @@ review-agent review --repo <owner/name> --pr <number> [options]
    - It is looked up **only in absolute `PATH` directories, and never inside the downloaded code** — see
      [security](security.md#what-the-model-can-do).
    - On Windows, install Claude Code with Anthropic's installer (`irm https://claude.ai/install.ps1 | iex` in
-     PowerShell) or `winget install Anthropic.ClaudeCode`: they put `claude.exe` on `PATH`. An npm install leaves
-     only `.cmd` scripts, which the reviewer does not run. Windows support is not yet tested; WSL2 works as Linux.
-2. **A model credential**, one of:
+     PowerShell) or `winget install Anthropic.ClaudeCode`: they put `claude.exe` on `PATH`. An npm install puts
+     only `.cmd` scripts on `PATH`, which the reviewer never runs; it finds the `claude.exe` npm installed beside
+     them instead (`node_modules\@anthropic-ai\claude-code\bin\claude.exe`). Windows support is not yet tested;
+     WSL2 works as Linux.
+   - npm 12 does not run a dependency's install script unless you allow it, and Claude Code's npm package needs
+     its script to put the real binary in place — without it, `claude` is a small placeholder. The reviewer
+     recognises the placeholder and stops with *"Claude Code's native binary is not installed — npm skipped its
+     install script"*, naming the file and the fix: reinstall with the package's install script allowed, or use
+     Anthropic's installer.
+2. **A model credential**, at most one of:
    - `ANTHROPIC_API_KEY` — an Anthropic API key, billed at per-token API prices;
    - `CLAUDE_CODE_OAUTH_TOKEN` — a subscription token from `claude setup-token`, drawn from that
      subscription's allowance;
    - neither — then `claude` uses its own login (`claude login`), if it has one.
+
+   **Both** set is refused with exit code `2`, so a review is always billed to an account you can name. Whichever
+   one is used, the `claude` process gets that one and no other.
 
    `ANTHROPIC_BASE_URL` must be **unset**: the reviewer refuses to run while it is set, because it sends the
    reviewed code to Anthropic and nowhere else. See [security](security.md).
@@ -98,14 +108,24 @@ with the reason; a run cut off by its budget ceiling prints `CUT SHORT:` and sti
 
 With `--json`, stdout is the [review record](how-it-works.md#the-review-record).
 
+Files of the repository that could not be written to the downloaded copy, and paths that differ only by letter
+case, are named on stderr as the review starts, and listed on the record.
+
+### Stopping a review
+
+**Ctrl-C** (or `SIGTERM`) stops the review: the `claude` process is stopped with it, the downloaded code is deleted,
+and the command exits `1` saying the review was stopped. A second Ctrl-C exits at once with `130`, without waiting
+for that clean-up.
+
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | the review finished |
-| `1` | the review did not finish: the model failed, ran out of budget, returned unreadable output, or an error was thrown |
-| `2` | bad usage: a missing or invalid flag, `--post`, `ANTHROPIC_BASE_URL` set, or no GitHub token |
+| `1` | the review did not finish: the model failed, ran out of budget, returned unreadable output, an error was thrown, or it was stopped with Ctrl-C |
+| `2` | bad usage: a missing or invalid flag, `--post`, `ANTHROPIC_BASE_URL` set, both model credentials set, or no GitHub token |
 | `3` | the review's output matched a secret pattern, so it was withheld rather than printed |
+| `130` | a second Ctrl-C, which exits without waiting for the review to stop |
 
 `review-agent` with no arguments prints help and exits `2`; `review-agent --help` exits `0`. There is no
 `--version` flag in this release: `npm ls -g @review-agent/cli` tells you which version is installed.
@@ -115,14 +135,17 @@ With `--json`, stdout is the [review record](how-it-works.md#the-review-record).
 | Variable | Needed | What it is |
 |---|---|---|
 | `GITHUB_TOKEN`, or `GH_TOKEN` | yes | read access to the repository |
-| `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | unless `claude` is logged in | the model credential |
+| `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | unless `claude` is logged in | the model credential. **One** of them: both set refuses the run (exit `2`) |
 | `ANTHROPIC_BASE_URL` | must be unset | a set value refuses the run |
-| `REVIEW_AGENT_CLAUDE_BIN` | no | the **absolute** path to the Claude Code binary, outside the reviewed code; a relative path is refused. Default: the first `claude` (`claude.exe` on Windows) in an absolute `PATH` directory |
-| `REVIEW_AGENT_SKILL_CACHE` | no | where [skills](configuration.md#skills) are cached; default `~/.cache/review-agent/skills`. **Must be an absolute path** — the directory is created on every review |
+| `CLAUDE_CONFIG_DIR` | no | where Claude Code keeps its login and settings, if you moved them; passed on to `claude` |
+| `USE_BUILTIN_RIPGREP` | no | Claude Code's own switch for using the system's `ripgrep` (Alpine); passed on to `claude` |
+| `REVIEW_AGENT_CLAUDE_BIN` | no | the **absolute** path to the Claude Code binary, outside the reviewed code; a relative path is refused, and so is npm's placeholder. Default: the first `claude` (`claude.exe` on Windows, or the one npm installed beside a `claude.cmd`) in an absolute `PATH` directory |
+| `REVIEW_AGENT_SKILL_CACHE` | no | where [skills](configuration.md#skills) are cached. Default: `~/Library/Caches/review-agent/skills` on macOS, `%LOCALAPPDATA%\review-agent\skills` on Windows, `$XDG_CACHE_HOME/review-agent/skills` or `~/.cache/review-agent/skills` elsewhere. **Must be an absolute path**; created (`0700`) only when a skill is configured |
 | `REVIEW_AGENT_SKILLS_TOKEN` | no | a GitHub token for downloading private `git` skill sources |
 
-The `claude` process sees only `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER` and the two model credentials — nothing
-else from your environment, your GitHub token included. See [security](security.md).
+The `claude` process sees only `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER`, `CLAUDE_CONFIG_DIR`, `USE_BUILTIN_RIPGREP`
+and the one model credential in use — nothing else from your environment, your GitHub token included. On Windows,
+Node also adds the system variables Windows needs, none of them secret. See [security](security.md).
 
 ### Examples
 

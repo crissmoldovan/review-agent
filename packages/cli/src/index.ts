@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { mkdtemp } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Octokit } from '@octokit/core'
 import { convertManifest } from '@review-agent/app'
-import { materialiseSkills, runCheckPass, runEngine, runRecheckPass } from '@review-agent/core'
+import {
+  defaultSkillCacheDir, materialiseSkills, runCheckPass, runEngine, runRecheckPass,
+} from '@review-agent/core'
 import { downloadArchive, fetchPullRequest, fetchRepoConfig } from '@review-agent/github'
 import { Command } from 'commander'
 import { EXIT_BAD_USAGE, EXIT_OK } from './exit-codes'
 import { runInitCommand } from './init-command'
 import { listenForManifestCode } from './init-server'
+import { cancelOnSignals } from './interrupt'
 import { runReviewCommand } from './review-command'
 
 const program = new Command()
@@ -39,20 +42,34 @@ program
   .option('--post', 'post the review to the pull request (not in this version)')
   .option('--json', 'print the machine-readable review record instead of a summary')
   .action(async (flags) => {
-    process.exitCode = await runReviewCommand(flags, {
-      fetchPullRequest, fetchRepoConfig, downloadArchive, materialiseSkills, runEngine, runCheckPass,
-      // Wired, and never reached: `runReviewCommand` reads no marker, so it passes no previous
-      // findings and `runReview` buys no third pass. The CLI's bill is unchanged by this feature.
-      runRecheckPass,
-      makeOctokit: (auth) => new Octokit({ auth }),
-      makeCheckoutDir: () => mkdtemp(join(tmpdir(), 'review-agent-')),
-      skillCacheDir: () =>
-        process.env.REVIEW_AGENT_SKILL_CACHE ?? join(homedir(), '.cache', 'review-agent', 'skills'),
-      stdout: (s) => { process.stdout.write(s) },
+    const interrupt = cancelOnSignals({
+      on: (s, l) => process.on(s, l),
+      off: (s, l) => process.off(s, l),
+      exit: (code) => process.exit(code),
       stderr: (s) => { process.stderr.write(s + '\n') },
-      env: process.env,
-      now: () => new Date(),
     })
+    try {
+      process.exitCode = await runReviewCommand(flags, {
+        fetchPullRequest, fetchRepoConfig, downloadArchive, materialiseSkills, runEngine, runCheckPass,
+        // Wired, and never reached: `runReviewCommand` reads no marker, so it passes no previous
+        // findings and `runReview` buys no third pass. The CLI's bill is unchanged by this feature.
+        runRecheckPass,
+        makeOctokit: (auth) => new Octokit({ auth }),
+        makeCheckoutDir: () => mkdtemp(join(tmpdir(), 'review-agent-')),
+        // This OS's own cache directory unless the user names one (spec 0.2.0 §9.3 P13). Empty counts as
+        // unset, as it does for REVIEW_AGENT_CLAUDE_BIN.
+        skillCacheDir: () => {
+          const named = process.env.REVIEW_AGENT_SKILL_CACHE ?? ''
+          return named !== '' ? named : defaultSkillCacheDir()
+        },
+        stdout: (s) => { process.stdout.write(s) },
+        stderr: (s) => { process.stderr.write(s + '\n') },
+        env: process.env,
+        now: () => new Date(),
+      }, { signal: interrupt.signal })
+    } finally {
+      interrupt.dispose()
+    }
   })
 
 program

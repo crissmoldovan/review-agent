@@ -5,21 +5,33 @@
 //   FAKE_CLAUDE_FIXTURE  path to the JSON to print on stdout
 //   FAKE_CLAUDE_EXIT     exit code (default 0; the real CLI exits 1 on a failure subtype)
 //   FAKE_CLAUDE_STDERR   text to print on stderr
-//   FAKE_CLAUDE_RECORD   path to write {argv, stdin, cwd, env} to, so tests can assert on what
-//                        the engine actually sent — this is how the stdin-prompt and the
-//                        environment-scrubbing rules get checked.
+//   FAKE_CLAUDE_RECORD   path to write {argv, stdin, cwd, env, systemPromptFile} to, so tests can
+//                        assert on what the engine actually sent — this is how the stdin-prompt
+//                        and the environment-scrubbing rules get checked. `systemPromptFile` is
+//                        {path, text, mode, dirMode} when argv has --append-system-prompt-file, read
+//                        here because the engine deletes the file once the run is over; else null.
 //   FAKE_CLAUDE_SLEEP_MS hold the process open this long (for the abort test)
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 const chunks = []
 for await (const c of process.stdin) chunks.push(c)
 
 if (process.env.FAKE_CLAUDE_RECORD) {
+  const argv = process.argv.slice(2)
+  const at = argv.indexOf('--append-system-prompt-file')
+  const file = at === -1 ? undefined : argv[at + 1]
   writeFileSync(process.env.FAKE_CLAUDE_RECORD, JSON.stringify({
-    argv: process.argv.slice(2),
+    argv,
     stdin: Buffer.concat(chunks).toString('utf8'),
     cwd: process.cwd(),
     env: process.env,
+    systemPromptFile: file === undefined ? null : {
+      path: file,
+      text: readFileSync(file, 'utf8'),
+      mode: statSync(file).mode & 0o777,
+      dirMode: statSync(dirname(file)).mode & 0o777,
+    },
   }))
 }
 

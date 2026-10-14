@@ -20,8 +20,14 @@ import type { ResolvedSettings, SeverityBands } from './config'
  *  1.1.1 — the re-review pass is told to copy the finding's `file` back with its answer, and that an
  *  answer which does not is discarded (`recheck-pass.ts`, `RecheckJudgement.file`). A PATCH, unlike
  *  1.1.0: the reviewer's and the check pass's words are untouched, so every review this product has
- *  posted stays comparable, and the pass these words belong to has not run against a model once. */
-export const REVIEW_INSTRUCTIONS_VERSION = '1.1.1'
+ *  posted stays comparable, and the pass these words belong to has not run against a model once.
+ *
+ *  1.2.0 — the reviewer is told how to write a finding's `file`: a repository-relative path with
+ *  forward slashes (spec 0.2.0 §9.3 P11). `runReview` normalises the path whatever the model writes,
+ *  so this asks for what the code already enforces. A MINOR bump, not a patch: unlike 1.1.1 these are
+ *  the reviewer's own words, the ones every review runs on, so a 1.2.0 review is one sentence away from
+ *  a 1.1.x one — a sentence about format, not about what to judge. */
+export const REVIEW_INSTRUCTIONS_VERSION = '1.2.0'
 
 const DEFAULT_BANDS: SeverityBands = { critical: 9, high: 7, medium: 4 }
 
@@ -65,6 +71,7 @@ const fixedRules = (bands: SeverityBands): string => [
   '- Report every real issue you find. Downstream code decides what gets posted, so do not hold back a real finding because it seems minor. Do not report style preferences.',
   '- Every finding needs evidence: the path:line locations you actually read that show it. If you could not confirm something, put it under "inconclusive" instead, and say what would settle it.',
   severityLine(bands),
+  '- "file" is a repository-relative path with forward slashes, as the diff writes it: src/app.ts, not ./src/app.ts, src\\app.ts or an absolute path.',
   '- "line" is a line number in the head version of the file, inside the changed lines where possible.',
   '- "suggestion" only when the fix is small and local: the exact replacement text for the lines from "line" to "end_line". Leave it out otherwise.',
   '- The summary says what the PR does, in two to four sentences, and whether it does what the brief says.',

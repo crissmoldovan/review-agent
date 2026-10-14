@@ -1,5 +1,5 @@
 import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { Octokit } from '@octokit/core'
 import {
@@ -129,7 +129,12 @@ export const liveRunReviewDeps = (a: { note: (s: string) => void }): RunReviewDe
   // A new directory per review: two reviews can share a warm machine, and a checkout that leaked
   // into another review's tree would be the reviewed code reviewing itself.
   makeCheckoutDir: () => mkdtemp(join(tmpdir(), 'review-agent-')),
-  skillCacheDir: () => process.env.REVIEW_AGENT_SKILL_CACHE ?? join(tmpdir(), 'review-agent-skills'),
+  // Per user (spec 0.2.0 §9.3 P13). The temp directory is shared, and one cache directory for every
+  // account on the machine let any of them plant an entry under the name this runner would look up;
+  // `materialiseSkills` now creates it 0700 and trusts only what this user owns. The uid, not the
+  // name, where there is one: it is what the ownership check compares.
+  skillCacheDir: () => process.env.REVIEW_AGENT_SKILL_CACHE ??
+    join(tmpdir(), `review-agent-skills-${process.getuid?.() ?? userInfo().username}`),
   now: () => new Date(),
   note: a.note,
 })

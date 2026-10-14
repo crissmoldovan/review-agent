@@ -1,12 +1,14 @@
+import { realpathSync } from 'node:fs'
+import { posix, win32 } from 'node:path'
 import { removeCheckout } from './checkout'
 import type { Octokit } from '@octokit/core'
 import {
   assertNoSecrets, buildPrompt, buildReviewRecord, resolveSettings, reviewJsonSchema,
   reviewSystemPrompt, scanForSecrets, SecretLeak, writesSummaryComment,
-  type CheckVerdict, type DeploymentConfig, type EngineInput, type EngineResult,
+  type CheckVerdict, type ClaudeRuntime, type DeploymentConfig, type EngineInput, type EngineResult,
   type MaterialisedSkill, type materialiseSkills, type PreviousFinding, type RecheckPassResult,
-  type ResolvedSettings, type ReviewRecord, type ReviewRequest, type runCheckPass,
-  type runEngine, type runRecheckPass, type Usage,
+  type ResolvedSettings, type ReviewOutput, type ReviewRecord, type ReviewRequest, type runCheckPass,
+  type runEngine, type runRecheckPass, type UnwrittenEntry, type Usage,
 } from '@review-agent/core'
 import type { downloadArchive } from './archive'
 import type { fetchPullRequest, PullRequestContext } from './pr'
@@ -82,6 +84,38 @@ const assertVerdictsCarryNoSecrets = (verdicts: CheckVerdict[]): void => {
   if (hits.length > 0) throw new SecretLeak(hits)
 }
 
+/** A finding's `file` as the repository writes it (spec 0.2.0 §9.3 P11): `\` turned into `/`, a
+ *  leading `./` dropped, and an absolute path under the checkout made relative to it. The review
+ *  instructions ask for exactly that; this is what makes it true when a model on Windows writes
+ *  `src\a.ts`, or quotes the path its Read tool was given. Anything else is left as it is — a path
+ *  outside the checkout is not repaired into one inside it — and anchoring drops what is not a file in
+ *  the diff, as it always has.
+ *
+ *  The checkout is compared both as given and resolved, because the model's working directory is the
+ *  resolved one (macOS's `/var/folders` is `/private/var/folders`), and both spellings may appear. */
+const repositoryPath = (file: string, checkoutRoots: readonly string[]): string => {
+  const slashed = file.replace(/\\/g, '/')
+  const onDrive = /^[A-Za-z]:\//.test(slashed)
+  if (!onDrive && !slashed.startsWith('/')) return slashed.replace(/^(\.\/)+/, '')
+  const path = onDrive ? win32 : posix
+  for (const root of checkoutRoots) {
+    const rel = path.relative(root.replace(/\\/g, '/'), slashed).replace(/\\/g, '/')
+    if (rel !== '' && rel !== '..' && !rel.startsWith('../') && !path.isAbsolute(rel)) return rel
+  }
+  return slashed
+}
+
+const withRepositoryPaths = (output: ReviewOutput, checkoutDir: string): ReviewOutput => {
+  let resolved = checkoutDir
+  try { resolved = realpathSync(checkoutDir) } catch { /* a checkout that is not there resolves to itself */ }
+  const roots = resolved === checkoutDir ? [checkoutDir] : [checkoutDir, resolved]
+  return { ...output, findings: output.findings.map((f) => ({ ...f, file: repositoryPath(f.file, roots) })) }
+}
+
+/** Up to ten names, then a count: a progress line, not the record, which has them all. */
+const someOf = (names: string[]): string =>
+  names.length <= 10 ? names.join(', ') : `${names.slice(0, 10).join(', ')} and ${names.length - 10} more`
+
 /** What a pass that never ran was billed. */
 const emptyUsage = (): Usage => ({
   costUsd: 0, inputTokens: 0, outputTokens: 0,
@@ -111,6 +145,10 @@ export const runReview = async (a: {
    *  review: no re-review pass runs and nothing is spent on one. The CLI passes nothing, reads no
    *  marker, and so buys no third pass. */
   previousFindings?: PreviousFinding[]
+  /** The credential, binary and passed-through variables every model pass of this review runs with
+   *  (spec 0.2.0 §3.2). Left out, the Claude process takes them from this process's environment, as
+   *  before. */
+  runtime?: ClaudeRuntime
   deps: RunReviewDeps
 }): Promise<RunReviewResult> => {
   const { octokit, owner, repo, number, deployment, ask, deps } = a
@@ -144,12 +182,21 @@ export const runReview = async (a: {
   // From here on the checkout exists. A failure removes it before it propagates: no publish will read
   // it. On success it is the caller's, who removes it once publishing has placed the comments.
   try {
-    const { removed } = await deps.downloadArchive({
+    const { removed, notWritten, caseCollisions } = await deps.downloadArchive({
       octokit, owner, repo, ref: pr.headSha, destDir: checkoutDir,
     })
     if (removed.length > 0) {
       const noun = removed.length === 1 ? 'credential file' : 'credential files'
       deps.note(`removed ${removed.length} ${noun} from the checkout before the review: ${removed.join(', ')}`)
+    }
+    // Spec 0.2.0 §9.3 P10: the same courtesy for what went missing by accident. The record and the
+    // summary carry the whole list; this line is for whoever is watching the review run.
+    if (notWritten.length > 0) {
+      const noun = notWritten.length === 1 ? 'entry' : 'entries'
+      deps.note(`${notWritten.length} archive ${noun} could not be written to the checkout, so the review cannot read ${notWritten.length === 1 ? 'it' : 'them'}: ${someOf(notWritten.map((e: UnwrittenEntry) => `${e.path} (${e.code})`))}`)
+    }
+    if (caseCollisions.length > 0) {
+      deps.note(`${caseCollisions.length} ${caseCollisions.length === 1 ? 'set' : 'sets'} of paths differ only by letter case or Unicode form; where the filesystem ignores that, each was one file in the checkout: ${someOf(caseCollisions.map((g) => g.join(' / ')))}`)
     }
 
     // The whole list, unfiltered: a git source is materialised into a real directory here, and a
@@ -163,11 +210,17 @@ export const runReview = async (a: {
       settings,
       schema: reviewJsonSchema({ maxFindings: settings.report.maxFindings }),
       skillDirs: skills.map((s) => s.path),
-      // Optional on EngineInput, and absent for the CLI, which is killed by its own terminal.
+      // Optional on EngineInput. The CLI passes one since 0.2.0, from Ctrl-C (spec 0.2.0 §9.3 P14).
       ...(a.signal !== undefined && { signal: a.signal }),
+      ...(a.runtime !== undefined && { runtime: a.runtime }),
     }
 
-    const result = await deps.runEngine(input)
+    // The paths, before anything reads them (spec 0.2.0 §9.3 P11): the secret scan, the check pass,
+    // the record and the anchoring all see one spelling, the repository's.
+    const ran = await deps.runEngine(input)
+    const result: EngineResult = ran.output === null
+      ? ran
+      : { ...ran, output: withRepositoryPaths(ran.output, checkoutDir) }
     if (result.output !== null) assertNoSecrets(result.output)
 
     // Design §4.6: cheap enough to leave on wherever findings are posted. It runs after the secret
@@ -220,6 +273,7 @@ export const runReview = async (a: {
     // the trigger.dev task returns it whatever the CLI does with it.
     const record = buildReviewRecord({
       request, settings, result, skills, check, recheck, removedFromCheckout: removed,
+      notWrittenToCheckout: notWritten, caseCollisions,
       startedAt, finishedAt: deps.now(),
     })
 

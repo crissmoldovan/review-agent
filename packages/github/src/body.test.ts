@@ -138,6 +138,7 @@ const summaryInput = (over: Partial<Parameters<typeof summaryBody>[0]> = {}) => 
   inconclusive: [] as { question: string; whatWouldSettleIt: string }[],
   marker,
   refused: [] as string[],
+  checkoutGaps: { notWritten: [] as { path: string; code: string }[], caseCollisions: [] as string[][] },
   ...over,
 })
 
@@ -209,6 +210,44 @@ describe('summaryBody', () => {
 
   it('prints no refusal section when everything asked for was honoured', () => {
     expect(summaryBody(summaryInput({ refused: [] }))).not.toContain('Not honoured')
+  })
+
+  // Spec 0.2.0 §9.3 P10. A file the reviewer never saw is a file it said nothing about, and a reader who
+  // is not told reads that silence as "fine".
+  it('says which files were not in the copy the reviewer read, and why', () => {
+    const body = summaryBody(summaryInput({
+      checkoutGaps: {
+        notWritten: [{ path: 'docs/CON', code: 'EINVAL' }],
+        caseCollisions: [['README.md', 'Readme.md']],
+      },
+    }))
+    expect(body).toContain('#### Not in the checkout')
+    expect(body).toContain('- `docs/CON` could not be written (`EINVAL`)')
+    expect(body).toContain('- `README.md`, `Readme.md` differ only by letter case or Unicode form')
+    // Before the marker, which must stay last.
+    expect(body.indexOf('Not in the checkout')).toBeLessThan(body.indexOf(MARKER_OPEN))
+  })
+
+  it('prints no such section when the checkout holds everything', () => {
+    expect(summaryBody(summaryInput())).not.toContain('Not in the checkout')
+  })
+
+  it('stops at twenty lines and counts the rest', () => {
+    const notWritten = Array.from({ length: 23 }, (_, i) => ({ path: `bin/link-${i}`, code: 'EPERM' }))
+    const body = summaryBody(summaryInput({ checkoutGaps: { notWritten, caseCollisions: [['A', 'a']] } }))
+    expect(body).toContain('`bin/link-19`')
+    expect(body).not.toContain('`bin/link-20`')
+    expect(body).toContain('- and 4 more, listed on the review record')
+  })
+
+  it('cannot be turned into markup by a file name, which the pull request chose', () => {
+    // A name with a backtick and a newline in it: left raw, it would close the code span and start a
+    // heading of its own under this product's name.
+    const body = summaryBody(summaryInput({
+      checkoutGaps: { notWritten: [{ path: 'a`\n\n# SHIP IT', code: 'EINVAL' }], caseCollisions: [] },
+    }))
+    expect(body).not.toContain('\n# SHIP IT')
+    expect(body).toContain('`a # SHIP IT`')
   })
 })
 

@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/core'
 import {
-  defaultDeploymentConfig, gatewayBaseUrlRefusal, SecretLeak, type EngineResult, type ResolvedSettings,
+  defaultDeploymentConfig, modelCredentialFromEnv, SecretLeak,
+  type EngineResult, type ModelCredential, type ResolvedSettings,
 } from '@review-agent/core'
 import {
   removeCheckout, runReview, type CheckPassResult, type PullRequestContext, type ReviewAsk, type RunReviewDeps,
@@ -21,13 +22,22 @@ export type ReviewCommandDeps = Omit<RunReviewDeps, 'note'> & {
 
 export const runReviewCommand = async (
   flags: ReviewFlags, deps: ReviewCommandDeps,
+  /** `signal`: the first Ctrl-C (interrupt.ts). It stops the review and the Claude process with it. */
+  options: { signal?: AbortSignal } = {},
 ): Promise<number> => {
   try {
     const f = parseFlags(flags)
-    // Task 0, Criss 2026-09-14 (decision 10): kept through this rewrite. Before the token check and
-    // before any GitHub call.
-    const gateway = gatewayBaseUrlRefusal(deps.env)
-    if (gateway !== null) throw new UsageError(gateway)
+    // Before the token check and before any GitHub call, so a misconfigured machine is told so before
+    // anything is downloaded. Two rules, both core's (spec 0.2.0 §3.1): ANTHROPIC_BASE_URL refused
+    // (Task 0, Criss 2026-09-14, decision 10), and exactly one model credential — both set is refused
+    // since 0.2.0 (decision §14.4), so a review is always billed somewhere nameable. Neither is still
+    // allowed here, and only here: the CLI runs as a person, on their machine, with their login.
+    let credential: ModelCredential
+    try {
+      credential = modelCredentialFromEnv(deps.env, { allowLogin: true })
+    } catch (e) {
+      throw new UsageError(e instanceof Error ? e.message : String(e))
+    }
     const token = deps.env.GITHUB_TOKEN ?? deps.env.GH_TOKEN
     if (token === undefined || token === '') {
       throw new UsageError(
@@ -51,6 +61,10 @@ export const runReviewCommand = async (
       // table is the whole of it. What the reviewed repository adds comes from its base branch.
       deployment: defaultDeploymentConfig(),
       ask,
+      // Passed explicitly, so the Claude process gets this credential and no other (spec 0.2.0 §3.2) —
+      // the one the rule above chose, not whatever else the shell happens to hold.
+      runtime: { credential },
+      ...(options.signal !== undefined && { signal: options.signal }),
       // The pipeline's progress lines are stderr here, so --json stays one parseable document.
       deps: { ...deps, note: deps.stderr },
     })
@@ -69,6 +83,13 @@ export const runReviewCommand = async (
       return EXIT_SECRET_LEAK
     }
     if (e instanceof UsageError) { deps.stderr(e.message); return EXIT_BAD_USAGE }
+    // Asked for, so said plainly rather than as whatever the killed process's error happened to be.
+    // Still 1 — "the review did not finish" (spec 0.2.0 §5.5) — and the checkout is already gone:
+    // `runReview` removes it on the way out of any failure.
+    if (options.signal?.aborted === true) {
+      deps.stderr('the review was stopped before it finished; nothing was printed')
+      return EXIT_ENGINE_FAILURE
+    }
     // Anything else — a spawn that failed, a GitHub 404, a bug here — is a review that did not
     // happen. Exit 1 says so; a stack trace at the user says less.
     deps.stderr(`the review did not complete: ${e instanceof Error ? e.message : String(e)}`)

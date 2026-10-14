@@ -162,7 +162,9 @@ const runReviewDepsWith = (over: Partial<RunReviewDeps> = {}): RunReviewDeps => 
   // commit from the one the check run was opened on.
   fetchPullRequest: vi.fn(async () => PR),
   fetchRepoConfig: vi.fn(async (): Promise<RepoConfig | null> => null),
-  downloadArchive: vi.fn(async (a: { destDir: string }) => ({ dir: a.destDir, removed: ['.npmrc'] })),
+  downloadArchive: vi.fn(async (a: { destDir: string }) => ({
+    dir: a.destDir, removed: ['.npmrc'], notWritten: [] as { path: string; code: string }[], caseCollisions: [] as string[][],
+  })),
   materialiseSkills: vi.fn(async () => []),
   runEngine: vi.fn(async () => RESULT),
   runCheckPass: vi.fn(async () => ({ verdicts: [] as CheckVerdict[], usage: CHECK_USAGE })),

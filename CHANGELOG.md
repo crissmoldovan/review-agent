@@ -3,6 +3,40 @@
 All four packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app` and `@review-agent/cli` — are
 released together, at the same version.
 
+## Unreleased (0.2.0)
+
+### Stage 1 — the engine: credentials, the Claude binary, platforms
+
+- **The CLI refuses two model credentials.** With both `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` set,
+  `review-agent review` now exits `2`, as the App's runner always has, so a review is billed to an account you can
+  name. With neither, it still uses `claude login`.
+- **A credential can travel with a review.** `runReview` takes a `runtime` — a credential, a Claude binary, and
+  variables to pass by name — carried into every model pass. A credential given this way is the only one the Claude
+  process sees, and prints as `[redacted]` wherever it is logged or serialised. Core exports `ModelCredential`,
+  `ClaudeRuntime`, `SecretValue` and `modelCredentialFromEnv`; the runner's credential check is now core's.
+- **Claude Code installed by npm.** On Windows the reviewer finds the `claude.exe` npm installed beside its
+  `claude.cmd` shim. On every OS, npm's placeholder for the binary — what an npm 12 install leaves when the package's
+  install script did not run — is recognised and reported as *"Claude Code's native binary is not installed — npm
+  skipped its install script"*, with the fix.
+- **Long review instructions go through a file.** On Windows, or when they are longer than 16,000 characters, they
+  are passed as `--append-system-prompt-file`: a private file outside the checkout, deleted after each pass.
+- **The Claude process may see `CLAUDE_CONFIG_DIR` and `USE_BUILTIN_RIPGREP`**, so a relocated Claude Code login
+  and Alpine work.
+- **Finding paths are repository paths.** `src\a.ts`, `./src/a.ts` and an absolute path inside the checkout all
+  become `src/a.ts` before anything reads them. The review instructions ask for that too: `REVIEW_INSTRUCTIONS_VERSION`
+  is `1.2.0`.
+- **Nothing goes missing from the checkout in silence.** Archive entries that could not be written, and paths that
+  differ only by letter case or Unicode form, are listed on the review record (`checkout.notWritten`,
+  `checkout.caseCollisions`; the record stays version 1) and in a *Not in the checkout* section of the summary.
+- **The skill cache is the user's own.** It is created `0700` and only when a skill is configured, an entry another
+  user owns is refused, and a run that loses a download race no longer fails on a read-only directory. The CLI's
+  default moved to this OS's cache directory (`~/Library/Caches/review-agent/skills` on macOS); the runner's is now
+  per user (`review-agent-skills-<uid>`).
+- **"Inside the checkout" is decided correctly** for a skill on another Windows drive, a directory named `..x`, and a
+  checkout reached through a symlink; a skill's short name is found on Windows paths too.
+- **Ctrl-C stops a CLI review** and the Claude process with it, and deletes the downloaded code; a second Ctrl-C
+  exits at once with `130`.
+
 ## 0.1.3
 
 ### Fixed

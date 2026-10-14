@@ -46,6 +46,13 @@ describe('reviewSystemPrompt — the measured instructions', () => {
     expect(p).toContain('- Severity, 1 to 10: 9-10 critical (security hole, data loss, production broken); 7-8 high (wrong behaviour on a real path); 4-6 medium (edge cases, fragile code likely to break); 1-3 low (clarity, small robustness gains).')
   })
 
+  // Spec 0.2.0 §9.3 P11. `runReview` normalises a finding's path whatever the model writes; this is the
+  // model being asked for the same thing, so the two are not left to disagree.
+  it('asks for a repository-relative path with forward slashes', () => {
+    const p = reviewSystemPrompt({ settings: settings() })
+    expect(p).toContain('- "file" is a repository-relative path with forward slashes, as the diff writes it: src/app.ts, not ./src/app.ts, src\\app.ts or an absolute path.')
+  })
+
   it('adds nothing at all when neither layer added anything', () => {
     const p = reviewSystemPrompt({ settings: settings() })
     expect(p).not.toContain('# Added instructions')
@@ -266,8 +273,8 @@ describe('the instructions are versioned', () => {
     expect(REVIEW_INSTRUCTIONS_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
     expect(REVIEW_INSTRUCTIONS_DIGEST).toMatch(/^[0-9a-f]{16}$/)
     expect({ version: REVIEW_INSTRUCTIONS_VERSION, digest: REVIEW_INSTRUCTIONS_DIGEST }).toEqual({
-      version: '1.1.1',
-      digest: '6f03a4bdcf86df7a',
+      version: '1.2.0',
+      digest: 'b8aba4fd796920ba',
     })
   })
 })

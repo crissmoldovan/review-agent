@@ -1,4 +1,8 @@
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { isInsideDir } from './cli-process'
 import { buildArgv } from './engine'
 import { inputFixture, settingsFixture } from '../test/helpers/engine-input'
 
@@ -29,6 +33,21 @@ describe('buildArgv', () => {
     ])
   })
 
+  // Spec 0.2.0 §9.3 P3: the same list, with the system prompt named by path. Equality again, for the
+  // same reason — and to pin that the text is not ALSO on the line, where it would be read twice.
+  it('names the system prompt file instead of carrying the text, and changes nothing else', () => {
+    const i = inputFixture()
+    const inline = buildArgv(i)
+    const viaFile = buildArgv(i, { systemPromptFile: '/tmp/review-agent-prompt-x/system-prompt.txt' })
+    const at = inline.indexOf('--append-system-prompt')
+    expect(viaFile).toEqual([
+      ...inline.slice(0, at),
+      '--append-system-prompt-file', '/tmp/review-agent-prompt-x/system-prompt.txt',
+      ...inline.slice(at + 2),
+    ])
+    expect(viaFile.join(' ')).not.toContain('You are the Acme PR reviewer.')
+  })
+
   // --safe-mode is NOT here on purpose. It looks like the safer flag and the throwaway spike
   // harness (spike/run-review.sh line 22) did pass it — so anyone porting those flags by hand
   // will bring it along. It disables every customisation *including skills*, which would kill
@@ -47,14 +66,16 @@ describe('buildArgv', () => {
       '-p', '--restricted', '--strict-mcp-config', '--tools', '--allowedTools', '--model',
       '--effort', '--max-budget-usd', '--no-session-persistence',
       '--exclude-dynamic-system-prompt-sections', '--output-format', '--json-schema',
-      '--append-system-prompt', '--plugin-dir',
+      '--append-system-prompt', '--append-system-prompt-file', '--plugin-dir',
     ])
-    const argv = buildArgv(inputFixture({
+    const input = inputFixture({
       skillDirs: ['/srv/skills/security', '/srv/skills/coverage'],
       settings: settingsFixture({ effort: 'max', model: 'claude-sonnet-5' }),
-    }))
-    const flags = argv.filter((a) => a.startsWith('--') || a === '-p')
-    expect([...new Set(flags)].filter((f) => !allowed.has(f))).toEqual([])
+    })
+    for (const argv of [buildArgv(input), buildArgv(input, { systemPromptFile: '/tmp/p/system-prompt.txt' })]) {
+      const flags = argv.filter((a) => a.startsWith('--') || a === '-p')
+      expect([...new Set(flags)].filter((f) => !allowed.has(f))).toEqual([])
+    }
   })
 
   it('appends one --plugin-dir per skill dir, in order, at the end', () => {
@@ -85,6 +106,28 @@ describe('buildArgv', () => {
     ).not.toThrow()
   })
 
+  // Spec 0.2.0 §9.3 P12. `..skills` is a perfectly good directory name, and the old test read any
+  // relative path starting with two dots as "climbs out" — so a skill directory the pull request
+  // added under that name was outside the checkout as far as this rule could tell.
+  it('refuses a directory inside the checkout whose name starts with two dots', () => {
+    expect(() =>
+      buildArgv(inputFixture({ checkoutDir: '/tmp/checkout', skillDirs: ['/tmp/checkout/..skills/x'] })),
+    ).toThrow(/inside the checkout/)
+  })
+
+  // The checkout's own path can be a symlink (macOS's temp directory is one), and a skill path the
+  // cache resolved does not share its spelling. Compared as written, they looked unrelated.
+  it.skipIf(process.platform === 'win32')('refuses a skill inside the checkout when the checkout is named through a symlink', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'argv-')))
+    const real = join(root, 'checkout')
+    mkdirSync(join(real, '.claude', 'skills', 'evil'), { recursive: true })
+    const link = join(root, 'checkout-link')
+    symlinkSync(real, link)
+    expect(() =>
+      buildArgv(inputFixture({ checkoutDir: link, skillDirs: [join(real, '.claude', 'skills', 'evil')] })),
+    ).toThrow(/inside the checkout/)
+  })
+
   it('spends up to the hard ceiling, not the soft target', () => {
     const argv = buildArgv(inputFixture({
       settings: settingsFixture({ budget: { targetUsd: 3, wrapUpAtUsd: 2.1, ceilingUsd: 7.5 } }),
@@ -104,5 +147,25 @@ describe('buildArgv', () => {
     const schema = { type: 'object', required: ['summary'] }
     const argv = buildArgv(inputFixture({ schema }))
     expect(argv[argv.indexOf('--json-schema') + 1]).toBe('{"type":"object","required":["summary"]}')
+  })
+})
+
+// The one test behind every "outside the checkout" rule in core (spec 0.2.0 §9.3 P12).
+describe('isInsideDir', () => {
+  it('knows a skill on another Windows drive is outside the checkout', () => {
+    // `relative` answers with the absolute `D:\\skills\\x` here, which the old test — "does it start
+    // with .. or /" — read as a path inside.
+    expect(isInsideDir('C:\\Temp\\review-agent-abc', 'D:\\skills\\x', win32)).toBe(false)
+    expect(isInsideDir('C:\\Temp\\review-agent-abc', 'C:\\Temp\\review-agent-abc\\.claude', win32)).toBe(true)
+    // Windows paths are not case-sensitive, and neither is this answer.
+    expect(isInsideDir('C:\\Temp\\Review-Agent-ABC', 'c:\\temp\\review-agent-abc\\x', win32)).toBe(true)
+  })
+
+  it('tells a child, the directory itself, a sibling and a parent apart', () => {
+    expect(isInsideDir('/tmp/checkout', '/tmp/checkout', posix)).toBe(true)
+    expect(isInsideDir('/tmp/checkout', '/tmp/checkout/..skills', posix)).toBe(true)
+    expect(isInsideDir('/tmp/checkout', '/tmp/checkout-skills', posix)).toBe(false)
+    expect(isInsideDir('/tmp/checkout', '/tmp', posix)).toBe(false)
+    expect(isInsideDir('/tmp/checkout', '/tmp/checkout/../elsewhere', posix)).toBe(false)
   })
 })
