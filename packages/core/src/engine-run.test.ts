@@ -108,9 +108,18 @@ describe('runEngine — isolation', () => {
       // Named, not pattern-matched: macOS CoreFoundation sets __CF_USER_TEXT_ENCODING inside every
       // process at startup, whatever it was launched with, so the child acquires it itself. It holds a
       // text-encoding id. A broad exemption here would hide exactly the leak this test exists to catch.
-      const OS_INJECTED = ['__CF_USER_TEXT_ENCODING']
-      const unexpected = seen.filter((k) =>
-        !CHILD_ENV_ALLOWLIST.includes(k) && !k.startsWith('FAKE_CLAUDE_') && !OS_INJECTED.includes(k))
+      // Windows: libuv adds these from the parent to ANY child environment that lacks them
+      // (deps/uv/src/win/process.c, `required_vars`) — "winsock will fail to initialize if SYSTEMROOT
+      // is not defined". None is a secret. Named for the same reason.
+      const OS_INJECTED = ['__CF_USER_TEXT_ENCODING',
+        ...(process.platform === 'win32'
+          ? ['HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN',
+             'USERNAME', 'USERPROFILE', 'WINDIR']
+          : [])]
+      // Windows variable names are case-insensitive and keep their own spelling (`Path`, `SystemRoot`).
+      const norm = (k: string): string => (process.platform === 'win32' ? k.toUpperCase() : k)
+      const allowed = new Set([...CHILD_ENV_ALLOWLIST, ...OS_INJECTED].map(norm))
+      const unexpected = seen.filter((k) => !allowed.has(norm(k)) && !k.startsWith('FAKE_CLAUDE_'))
       expect(unexpected).toEqual([])
       for (const k of Object.keys(planted)) expect(seen).not.toContain(k)
     } finally {

@@ -3,7 +3,7 @@ import {
   defaultDeploymentConfig, gatewayBaseUrlRefusal, SecretLeak, type EngineResult, type ResolvedSettings,
 } from '@review-agent/core'
 import {
-  runReview, type CheckPassResult, type PullRequestContext, type ReviewAsk, type RunReviewDeps,
+  removeCheckout, runReview, type CheckPassResult, type PullRequestContext, type ReviewAsk, type RunReviewDeps,
 } from '@review-agent/github'
 import { EXIT_BAD_USAGE, EXIT_ENGINE_FAILURE, EXIT_OK, EXIT_SECRET_LEAK } from './exit-codes'
 import { parseFlags, UsageError, type ReviewFlags } from './flags'
@@ -44,7 +44,7 @@ export const runReviewCommand = async (
       ...(f.budgetUsd !== undefined && { budgetUsd: f.budgetUsd }),
     }
 
-    const { pr, settings, result, check, record } = await runReview({
+    const { pr, settings, result, check, record, checkoutDir } = await runReview({
       octokit: deps.makeOctokit(token),
       owner: f.owner, repo: f.repo, number: f.pr,
       // The CLI is a deployment of one: it reads no configuration file of its own, so the built-in
@@ -55,6 +55,8 @@ export const runReviewCommand = async (
       deps: { ...deps, note: deps.stderr },
     })
 
+    // The CLI publishes nothing, so it has finished with the downloaded code.
+    await removeCheckout(checkoutDir)
     if (f.json) deps.stdout(JSON.stringify(record, null, 2) + '\n')
     else deps.stdout(render({ pr, settings, result, check }))
 

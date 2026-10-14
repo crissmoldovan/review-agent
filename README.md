@@ -24,7 +24,7 @@ The retry logic moved into the client. Check every caller still handles a 429.
 
 ## Status
 
-**`0.1.2`, early.** Use it, and read its findings as a careful colleague's first pass, not as a verdict.
+**`0.1.3`, early.** Use it, and read its findings as a careful colleague's first pass, not as a verdict.
 
 - **Built and working:** the review engine, the [CLI](docs/cli.md), and the [GitHub App](docs/deploying.md) mode —
   webhook receiver library plus [trigger.dev](https://trigger.dev) runner — which posts reviews, comments and check

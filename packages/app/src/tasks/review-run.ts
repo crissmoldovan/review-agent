@@ -4,7 +4,7 @@ import {
   type DeploymentConfig, type ReviewRecord, type ReviewRequest,
 } from '@review-agent/core'
 import {
-  checkRunWanted, recheckQuestions, verdictJson,
+  checkRunWanted, recheckQuestions, removeCheckout, verdictJson,
   type CheckConclusion, type CheckGate, type CheckOutcome, type closeCheckRunIfInProgress,
   type completeCheckRun, type createCheckRun,
   type fetchPullRequest, type fetchRepoConfig, type findSummaryComment, type FoundSummary,
@@ -535,6 +535,9 @@ const reviewOnce = async (
    *  backstop exists for. Measured reviews take 55s to 4m40s (design §8), so 30 minutes is about
    *  six times the slowest thing ever observed. */
   const stop = new AbortController()
+  // The downloaded code, once `runReview` has returned it: removed in the `finally` below, after
+  // publishing has read it, whatever happened in between.
+  let checkoutToRemove: string | null = null
   const stopped: { by: 'cancelled' | 'deadline' | null } = { by: null }
   const cancel = (): void => {
     stopped.by ??= 'cancelled'
@@ -616,6 +619,7 @@ const reviewOnce = async (
         octokit, owner, repo, number, deployment, ask, deps: runDeps, signal: stop.signal,
         previousFindings,
       })
+      checkoutToRemove = review.checkoutDir
     } catch (e) {
       // SecretLeak's own message is names and locations only, never the matched text
       // (packages/core/src/secrets.ts), so it is safe to render as it is. Anything else is an error
@@ -824,6 +828,7 @@ const reviewOnce = async (
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', cancel)
+    if (checkoutToRemove !== null) await removeCheckout(checkoutToRemove)
   }
 }
 

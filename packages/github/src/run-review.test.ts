@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Octokit } from '@octokit/core'
 import {
   defaultDeploymentConfig, REVIEW_INSTRUCTIONS_VERSION, SecretLeak,
@@ -454,5 +457,27 @@ describe('runReview: stopping a review', () => {
     const d = deps({ runEngine: vi.fn(async (i: EngineInput) => { seen = i.signal; return RESULT }) })
     await run(d)
     expect(seen).toBeUndefined()
+  })
+})
+
+describe('runReview: the downloaded code', () => {
+  const realCheckout = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'ra-checkout-'))
+    writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+    return dir
+  }
+
+  it('is removed when the review fails, because nothing will publish from it', async () => {
+    const dir = realCheckout()
+    const d = deps({ makeCheckoutDir: vi.fn(async () => dir), runEngine: vi.fn(async () => { throw new Error('engine exploded') }) })
+    await expect(run(d)).rejects.toThrow(/engine exploded/)
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it('is kept and handed back when the review succeeds, for publishing to read', async () => {
+    const dir = realCheckout()
+    const r = await run(deps({ makeCheckoutDir: vi.fn(async () => dir) }))
+    expect(r.checkoutDir).toBe(dir)
+    expect(existsSync(join(dir, 'a.ts'))).toBe(true)
   })
 })

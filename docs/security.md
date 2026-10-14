@@ -48,7 +48,8 @@ it is judged by.
   the like), `.npmrc`, `.netrc`, `.git-credentials`, `.pypirc`, `.yarnrc`, `.pgpass`, `.htpasswd`, `id_rsa` and other
   SSH keys, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `.docker/config.json`, `.aws/credentials`,
   `.kube/config` — and listed on the record.
-- Each review gets a fresh directory.
+- Each review gets a fresh directory, and it is **deleted** when the review has been published or printed, or as
+  soon as the review fails.
 
 ## What is posted
 
@@ -79,5 +80,5 @@ it is judged by.
 
 ## Reporting a vulnerability
 
-Please report security issues privately, through GitHub's **Report a vulnerability** on this repository's
-**Security** tab, rather than in a public issue.
+Please report security issues privately, as [SECURITY.md](../SECURITY.md) describes — through GitHub's **Report a
+vulnerability** on this repository's **Security** tab, rather than in a public issue.

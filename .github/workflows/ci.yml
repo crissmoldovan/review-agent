@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    # Windows runs, and is reported, but does not fail the build until 0.2.0 finishes the Windows
+    # work (docs/specs/0.2.0-ways-in.md §9.3).
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: 22, experimental: false }
+          - { os: ubuntu-latest, node: 24, experimental: false }
+          - { os: macos-latest, node: 22, experimental: false }
+          - { os: windows-latest, node: 22, experimental: true }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: pnpm typecheck
+      # No model credential and no GitHub token are in scope: the unit tests run a fake Claude Code
+      # and never spend money. The paid end-to-end tests are a separate config and never run here.
+      - run: pnpm test

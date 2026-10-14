@@ -182,11 +182,17 @@ export const spawnClaude = (a: {
       reject(e instanceof Error ? e : new Error(String(e)))
       return
     }
-    const child = spawn(bin, a.argv, {
+    // A JavaScript entry point (`.js`, `.mjs`, `.cjs`) is run with this Node: Windows cannot start a
+    // script by its shebang, and Claude Code's own npm package falls back to `node cli-wrapper.cjs`.
+    // The path was resolved and checked above either way.
+    const viaNode = /\.(c|m)?js$/i.test(bin)
+    const child = spawn(viaNode ? process.execPath : bin, viaNode ? [bin, ...a.argv] : a.argv, {
       cwd: a.cwd,
       env: childEnv(a.extraEnv),
       signal: a.signal,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // No console window flashing up when the reviewer runs from a GUI app or a service on Windows.
+      windowsHide: true,
     })
     let out = ''
     let err = ''

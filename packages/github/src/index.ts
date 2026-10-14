@@ -1,5 +1,6 @@
 export * from './pr'
 export * from './archive'
+export * from './checkout'
 export * from './repo-config'
 export * from './anchor'
 export * from './report'

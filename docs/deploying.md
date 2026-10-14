@@ -235,7 +235,7 @@ finding became — set `REVIEW_AGENT_RECORD_URL` (it must be `https://`) and a s
     "result": {
       "kind": "reviewed",
       "headSha": "…",                      // the commit reviewed
-      "record": { "recordVersion": 1, "engineVersion": "0.1.2", "…": "…" },   // see How it works
+      "record": { "recordVersion": 1, "engineVersion": "0.1.3", "…": "…" },   // see How it works
       "reviewId": 77,                      // the GitHub review, or null
       "summaryCommentId": 903,             // the summary comment, or null
       "counts": {

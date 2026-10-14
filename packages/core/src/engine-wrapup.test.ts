@@ -23,7 +23,7 @@ describe('the wrap-up', () => {
     expect(sys).toMatch(/stop opening new files/i)
   })
 
-  // The negative result of docs/spikes/wrap-up.md, wired to something that can fail. The delivery
+  // The negative result of the wrap-up spike run during development, wired to something that can fail. The delivery
   // half is proven; what is missing is the trigger, and this is the thing that would have to change
   // for the wrap-up to become buildable. When this test fails, the CLI has started telling a hook
   // what a run has spent — go and read the spike.
@@ -47,7 +47,7 @@ describe('runEngine — the wrap-up that does not exist yet', () => {
     for (const k of ['REVIEW_AGENT_CLAUDE_BIN', 'FAKE_CLAUDE_FIXTURE']) delete process.env[k]
   })
 
-  it('wrapUpFired is always false until a mechanism exists (docs/spikes/wrap-up.md)', async () => {
+  it('wrapUpFired is always false until a mechanism exists (the wrap-up spike)', async () => {
     const r = await runEngine(inputFixture({ checkoutDir: checkout }))
     // A completed run, output and all — and still no wrap-up, because nothing can fire one.
     expect(r.output?.findings).toHaveLength(4)

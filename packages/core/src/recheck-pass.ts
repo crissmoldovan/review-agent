@@ -229,7 +229,7 @@ const rowsFor = (previous: PreviousFinding[]): Record<string, string | number>[]
  *  checkout shows what the code is now, not what it was). And first means the engine's and the check
  *  pass's prompt prefix is this pass's prefix, which is what a prompt cache can serve: the check pass
  *  measured 4 uncached input tokens against 7,593-13,792 cache reads on the same shape (run 2 and
- *  run 3, `docs/measurements/e2e-app-first-post.md`). Not a guarantee — a cache is a vendor's
+ *  run 3, measured during development). Not a guarantee — a cache is a vendor's
  *  behaviour and this product neither controls nor verifies it — but reordering these two halves
  *  could only make it worse, and that is worth a sentence rather than a shrug. */
 const recheckPrompt = (prompt: string, previous: PreviousFinding[]): string =>

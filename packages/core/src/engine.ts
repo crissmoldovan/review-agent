@@ -139,7 +139,7 @@ export const runEngine = async (i: EngineInput): Promise<EngineResult> => {
     // review in progress, and a login failure reporting it would send someone looking at budgets.
     cutShort: terminalReason !== 'completed' && failure?.kind !== 'cli-error',
     // Always false, and it is not an oversight: nothing can fire. The spike of 2026-09-13
-    // (docs/spikes/wrap-up.md) proved the delivery half works — a PostToolUse hook passed through
+    // (a spike during development) proved the delivery half works — a PostToolUse hook passed through
     // --settings survives --restricted and demonstrably puts text in front of the model — and then
     // found there is no spend to trigger it on. The hook event carries no cost, no usage and no
     // token count; --no-session-persistence means the transcript it points at is never written; and

@@ -200,7 +200,7 @@ export async function installationToken(a: {
  *  only code that touches the key: the internet-facing half never holds it (plan 2's Global
  *  Constraints), and Task 8's import-graph test enforces that.
  *  The CLIENT id, not the App id: the JWT's `iss` is the client ID ("Use of the client ID is
- *  recommended", docs/plans/2026-09-14-verified-api-facts.md, "Installation tokens"). */
+ *  recommended", GitHub's REST documentation, "Installation tokens"). */
 export const APP_IDENTITY_VARS = {
   clientId: 'REVIEW_AGENT_APP_CLIENT_ID',
   privateKey: 'REVIEW_AGENT_APP_PRIVATE_KEY',

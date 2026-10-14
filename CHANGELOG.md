@@ -3,6 +3,30 @@
 All four packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app` and `@review-agent/cli` — are
 released together, at the same version.
 
+## 0.1.3
+
+### Fixed
+
+- **The downloaded code is deleted after every review.** Before, each review left a full copy of the reviewed
+  repository in the system's temp directory, and nothing removed it — on a laptop, a CI runner or a long-running
+  server, copies of every repository ever reviewed. Now the CLI deletes it once the review is printed, the App's
+  runner once the review is published, and a review that fails deletes it at once.
+- On Windows: a JavaScript entry point given as `REVIEW_AGENT_CLAUDE_BIN` is run with Node (Windows cannot start a
+  script by its first line), no console window flashes up, and the CLI's build no longer needs a Unix shell.
+
+### Security
+
+- `0.1.0` and `0.1.1` of all four packages are **deprecated** on npm, pointing to `0.1.2`, and the Windows issue fixed
+  in `0.1.2` is published as [GHSA-m34m-4c65-cqf6](https://github.com/crissmoldovan/review-agent/security/advisories/GHSA-m34m-4c65-cqf6).
+- A [security policy](SECURITY.md): how to report a vulnerability privately, and what is in scope.
+
+### Repository
+
+- Continuous integration on every pull request: build, typecheck and every test on Linux (Node 22 and 24) and macOS;
+  Windows runs too, reported but not yet required.
+- The original v0 design record is published as [docs/design.md](docs/design.md), so the code's "design §N"
+  references resolve. Comments no longer point at documents that are not in this repository.
+
 ## 0.1.2
 
 ### Security

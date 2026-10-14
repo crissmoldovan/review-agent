@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Octokit } from '@octokit/core'
 import {
@@ -1639,5 +1641,14 @@ describe('the finished result carries the comment each posted finding became', (
   it('is an empty list — not absent — when nothing was posted inline', async () => {
     const out = reviewedOf(await reviewTaskRun(PAYLOAD, {}, deps()))
     expect(out.comments).toEqual([])
+  })
+})
+
+describe('the review task: the downloaded code', () => {
+  it('is deleted after the review is published', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ra-runner-checkout-'))
+    const d = deps({ runReview: vi.fn(async () => ({ ...reviewOf(), checkoutDir: dir })) })
+    reviewedOf(await reviewTaskRun(PAYLOAD, {}, d))
+    expect(existsSync(dir)).toBe(false)
   })
 })

@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Octokit } from '@octokit/core'
 import {
   REVIEW_INSTRUCTIONS_VERSION,
@@ -298,5 +301,14 @@ describe('the CLI buys no re-review pass', () => {
     expect(record.recheckJudgements).toBeNull()
     // The engine and the check pass, and nothing else: the CLI's bill is exactly what it was.
     expect(record.costUsd).toBeCloseTo(RESULT.usage.costUsd + CHECK_USAGE.costUsd, 6)
+  })
+})
+
+describe('runReviewCommand: the downloaded code', () => {
+  it('is deleted once the review is printed — the CLI keeps no copy of the code it reviewed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ra-cli-checkout-'))
+    const d = deps({ makeCheckoutDir: vi.fn(async () => dir) })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16' }, d)).toBe(0)
+    expect(existsSync(dir)).toBe(false)
   })
 })

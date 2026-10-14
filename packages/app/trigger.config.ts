@@ -280,7 +280,7 @@ export default defineConfig({
   // `src/tasks`, so without this line the dry run fails outright with
   //   Error: No trigger files found
   // and an empty "Dirs config" / "Search patterns" — which is what it did on the first attempt
-  // (docs/spikes/claude-in-image.md, Step 7). There is no CLI flag for it: `deploy --help` has none,
+  // (measured during development). There is no CLI flag for it: `deploy --help` has none,
   // so it has to be the config. Renaming the directory to `trigger` would work too and is worse —
   // `src/tasks` is what Tasks 8–11 and Task 13 already refer to.
   dirs: ['./src/tasks'],
@@ -296,7 +296,7 @@ export default defineConfig({
   // ~636 MiB of headroom, and well under the ~700 MB at which Step 16 said to move to `medium-1x`.
   // The shape: 15 MiB for the node CLI alone, ~90 MiB through checkout, then a step to ~350 MiB
   // the moment the `claude` child starts — the child is roughly three-quarters of the total — and
-  // a slow climb to 388 MiB. Full series and caveats: docs/spikes/claude-in-image.md.
+  // a slow climb to 388 MiB (measured during development; the series is not published).
   //
   // WHAT THE IMAGE ITSELF ADDED (deployment 20260914.2's probe run):
   // `cgroupPeakBytes` 130,142,208 = 124 MiB and `rssBytes` 106,147,840 = 101 MiB, for a task that
@@ -331,8 +331,7 @@ export default defineConfig({
   // instrument, not the image: summing RSS across a process tree counts pages shared between parent
   // and child once PER PROCESS, while a cgroup peak counts each page once for the group. So 388 MiB
   // over-reports. The spike's own `129 + (388 - 15) ~= 500 MiB` extrapolation was 206 MiB HIGH, for
-  // exactly that reason. Full reading: docs/spikes/claude-in-image.md, "Criterion 5, CLOSED", and
-  // docs/measurements/e2e-app-first-post.md.
+  // exactly that reason (measured during development).
   //
   // What this number does NOT settle, stated so nobody reads it as more than it is:
   //   * ~~It is macOS, not the deployed Linux image. The in-image peak is owed by Task 15 Step 17~~
@@ -361,7 +360,7 @@ export default defineConfig({
   // Why 2700 (45 minutes) and not something near a real review: measured reviews take 55s to
   // 4m40s of WALL CLOCK (design §8), and the machine
   // has ONE vCPU — `small-2x`, and `medium-1x` if Step 16 moves (the Machines table in
-  // docs/plans/2026-09-14-verified-api-facts.md) — so compute time cannot accrue faster than one
+  // trigger.dev's documentation) — so compute time cannot accrue faster than one
   // second per wall-clock second and the slowest review ever observed cannot spend more than ~280
   // of these seconds. 2700 is about nine times that. The bound is deliberately the pessimistic
   // one: the documented exclusions from maxDuration are `wait.for`, `triggerAndWait` and
@@ -400,7 +399,7 @@ export default defineConfig({
     extensions: [
       // The one line this whole spike exists to prove. The version is pinned because an omitted
       // version "may use a cached or older resolution", and because the engine's behaviour was
-      // measured against a specific CLI (docs/spikes/wrap-up.md was run on 2.1.258).
+      // measured against a specific CLI (the wrap-up spike during development was run on 2.1.258).
       //
       // This installs the package and NOTHING ELSE: version 20260914.1's build log shows it working
       // exactly as intended — `COPY package.json`, `npm i`, `added 7 packages in 3s`, the pin

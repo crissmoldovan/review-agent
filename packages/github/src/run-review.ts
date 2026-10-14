@@ -1,3 +1,4 @@
+import { removeCheckout } from './checkout'
 import type { Octokit } from '@octokit/core'
 import {
   assertNoSecrets, buildPrompt, buildReviewRecord, resolveSettings, reviewJsonSchema,
@@ -140,87 +141,94 @@ export const runReview = async (a: {
   }
 
   const checkoutDir = await deps.makeCheckoutDir()
-  const { removed } = await deps.downloadArchive({
-    octokit, owner, repo, ref: pr.headSha, destDir: checkoutDir,
-  })
-  if (removed.length > 0) {
-    const noun = removed.length === 1 ? 'credential file' : 'credential files'
-    deps.note(`removed ${removed.length} ${noun} from the checkout before the review: ${removed.join(', ')}`)
-  }
+  // From here on the checkout exists. A failure removes it before it propagates: no publish will read
+  // it. On success it is the caller's, who removes it once publishing has placed the comments.
+  try {
+    const { removed } = await deps.downloadArchive({
+      octokit, owner, repo, ref: pr.headSha, destDir: checkoutDir,
+    })
+    if (removed.length > 0) {
+      const noun = removed.length === 1 ? 'credential file' : 'credential files'
+      deps.note(`removed ${removed.length} ${noun} from the checkout before the review: ${removed.join(', ')}`)
+    }
 
-  // The whole list, unfiltered: a git source is materialised into a real directory here, and a
-  // `filter(s => s.kind === 'dir')` would drop it in silence.
-  const skills = await deps.materialiseSkills(settings.skills, deps.skillCacheDir())
+    // The whole list, unfiltered: a git source is materialised into a real directory here, and a
+    // `filter(s => s.kind === 'dir')` would drop it in silence.
+    const skills = await deps.materialiseSkills(settings.skills, deps.skillCacheDir())
 
-  const input: EngineInput = {
-    checkoutDir,
-    prompt: buildPrompt({ pr, brief: settings.brief }),
-    systemPrompt: reviewSystemPrompt({ settings }),
-    settings,
-    schema: reviewJsonSchema({ maxFindings: settings.report.maxFindings }),
-    skillDirs: skills.map((s) => s.path),
-    // Optional on EngineInput, and absent for the CLI, which is killed by its own terminal.
-    ...(a.signal !== undefined && { signal: a.signal }),
-  }
+    const input: EngineInput = {
+      checkoutDir,
+      prompt: buildPrompt({ pr, brief: settings.brief }),
+      systemPrompt: reviewSystemPrompt({ settings }),
+      settings,
+      schema: reviewJsonSchema({ maxFindings: settings.report.maxFindings }),
+      skillDirs: skills.map((s) => s.path),
+      // Optional on EngineInput, and absent for the CLI, which is killed by its own terminal.
+      ...(a.signal !== undefined && { signal: a.signal }),
+    }
 
-  const result = await deps.runEngine(input)
-  if (result.output !== null) assertNoSecrets(result.output)
+    const result = await deps.runEngine(input)
+    if (result.output !== null) assertNoSecrets(result.output)
 
-  // Design §4.6: cheap enough to leave on wherever findings are posted. It runs after the secret
-  // scan, never before — a review that cannot be emitted must not buy a second model call.
-  let check: CheckPassResult | null = null
-  if (settings.check && result.output !== null) {
-    check = await deps.runCheckPass({ findings: result.output.findings, input })
-    assertVerdictsCarryNoSecrets(check.verdicts)
-  }
+    // Design §4.6: cheap enough to leave on wherever findings are posted. It runs after the secret
+    // scan, never before — a review that cannot be emitted must not buy a second model call.
+    let check: CheckPassResult | null = null
+    if (settings.check && result.output !== null) {
+      check = await deps.runCheckPass({ findings: result.output.findings, input })
+      assertVerdictsCarryNoSecrets(check.verdicts)
+    }
 
-  // Criss, 2026-09-16: ask the model instead of inferring. ON A RE-REVIEW ONLY — a first review has
-  // no previous findings, so the early return in `runRecheckPass` costs nothing and spawns nothing.
-  //
-  // Here, and not in `publishReview`, for two reasons. This is the only point that already holds a
-  // built `EngineInput` — the checkout, the skills, the signal and the budget — and it is upstream
-  // of `buildReviewRecord`, so a third pass's money is recorded and labelled like the other two
-  // instead of being spent after the record is sealed. An unrecorded cost is not something this
-  // product does: `record.costUsd` is the number printed in the public summary.
-  //
-  // After the check pass, and after the secret scan, for the reason above them: a review that cannot
-  // be emitted must not buy another model call, and the pass that decides what is SAID goes first.
-  //
-  // It fails closed TWICE, and the second time is not redundant. `runRecheckPass` catches its own
-  // failures and hands back a result with no judgements — but it arrives here as an injected
-  // dependency, and both production callers wrap it (the trigger.dev task wraps it to watch spend
-  // from outside). A throw from a wrapper, or from a future one, would otherwise take the review
-  // down with it. This is the one place the rule has to hold whatever is on the other side of the
-  // call: an outcome refinement must never cost the pull request its review.
-  //
-  // AND ONLY IN A MODE THAT WRITES THE SUMMARY. Both consumers of the answer are behind that test —
-  // the marker write and the comment edits, in `publishReview` — so in `check-only` and `silent` this
-  // pass would spawn, spend and be discarded, on every review, for ever. It is reachable: a pull
-  // request reviewed in `inline+summary` has a marker, and a repository may lower the mode from its
-  // base branch at any time (`resolveSettings`). A deployment that cannot write the answer down does
-  // not buy the answer.
-  const previousFindings = a.previousFindings ?? []
-  let recheck: RecheckResult | null = null
-  if (previousFindings.length > 0 && result.output !== null && writesSummaryComment(settings.report.mode)) {
-    const asked = { previous: previousFindings, input,
-      // What the review and the check have already cost. The pass refuses to start if this leaves
-      // less headroom under the review's own ceiling than the pass's own target.
-      spentUsd: result.usage.costUsd + (check?.usage.costUsd ?? 0) }
-    const answered = await deps.runRecheckPass(asked).catch((): RecheckPassResult => ({
-      judgements: [], usage: emptyUsage(), ran: false, skipped: 'error',
-    }))
-    recheck = { asked: previousFindings, ...answered }
-  }
+    // Criss, 2026-09-16: ask the model instead of inferring. ON A RE-REVIEW ONLY — a first review has
+    // no previous findings, so the early return in `runRecheckPass` costs nothing and spawns nothing.
+    //
+    // Here, and not in `publishReview`, for two reasons. This is the only point that already holds a
+    // built `EngineInput` — the checkout, the skills, the signal and the budget — and it is upstream
+    // of `buildReviewRecord`, so a third pass's money is recorded and labelled like the other two
+    // instead of being spent after the record is sealed. An unrecorded cost is not something this
+    // product does: `record.costUsd` is the number printed in the public summary.
+    //
+    // After the check pass, and after the secret scan, for the reason above them: a review that cannot
+    // be emitted must not buy another model call, and the pass that decides what is SAID goes first.
+    //
+    // It fails closed TWICE, and the second time is not redundant. `runRecheckPass` catches its own
+    // failures and hands back a result with no judgements — but it arrives here as an injected
+    // dependency, and both production callers wrap it (the trigger.dev task wraps it to watch spend
+    // from outside). A throw from a wrapper, or from a future one, would otherwise take the review
+    // down with it. This is the one place the rule has to hold whatever is on the other side of the
+    // call: an outcome refinement must never cost the pull request its review.
+    //
+    // AND ONLY IN A MODE THAT WRITES THE SUMMARY. Both consumers of the answer are behind that test —
+    // the marker write and the comment edits, in `publishReview` — so in `check-only` and `silent` this
+    // pass would spawn, spend and be discarded, on every review, for ever. It is reachable: a pull
+    // request reviewed in `inline+summary` has a marker, and a repository may lower the mode from its
+    // base branch at any time (`resolveSettings`). A deployment that cannot write the answer down does
+    // not buy the answer.
+    const previousFindings = a.previousFindings ?? []
+    let recheck: RecheckResult | null = null
+    if (previousFindings.length > 0 && result.output !== null && writesSummaryComment(settings.report.mode)) {
+      const asked = { previous: previousFindings, input,
+        // What the review and the check have already cost. The pass refuses to start if this leaves
+        // less headroom under the review's own ceiling than the pass's own target.
+        spentUsd: result.usage.costUsd + (check?.usage.costUsd ?? 0) }
+      const answered = await deps.runRecheckPass(asked).catch((): RecheckPassResult => ({
+        judgements: [], usage: emptyUsage(), ran: false, skipped: 'error',
+      }))
+      recheck = { asked: previousFindings, ...answered }
+    }
 
-  // Built on every run, not only when somebody asked to see it: it is pure, it costs nothing, and
-  // the trigger.dev task returns it whatever the CLI does with it.
-  const record = buildReviewRecord({
-    request, settings, result, skills, check, recheck, removedFromCheckout: removed,
-    startedAt, finishedAt: deps.now(),
-  })
+    // Built on every run, not only when somebody asked to see it: it is pure, it costs nothing, and
+    // the trigger.dev task returns it whatever the CLI does with it.
+    const record = buildReviewRecord({
+      request, settings, result, skills, check, recheck, removedFromCheckout: removed,
+      startedAt, finishedAt: deps.now(),
+    })
 
-  return {
-    pr, request, settings, result, check, recheck, skills, checkoutDir,
-    removedFromCheckout: removed, record,
+    return {
+      pr, request, settings, result, check, recheck, skills, checkoutDir,
+      removedFromCheckout: removed, record,
+    }
+  } catch (e) {
+    await removeCheckout(checkoutDir)
+    throw e
   }
 }
