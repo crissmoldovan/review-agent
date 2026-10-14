@@ -101,9 +101,12 @@ export type ResolvedSettings = {
 }
 
 /** The built-in defaults: design §3.1's table, and §3's tier presets.
- *  `thorough`'s numbers are provisional — design §3 leaves its budget "set when built" and the
- *  measured three-reviewer runs cost $2.84 and $5.91 (§8), so $8 is a target with headroom, and
- *  `agents: 3` is the three lenses that were actually measured: intent, impact, security.
+ *  `thorough` is ONE reviewer at `high` effort, in every way in (spec 0.2.0 §8.1, decision §14.1).
+ *  It used to say `agents: 3` — the three lenses the two measured three-reviewer runs used — which
+ *  made every `thorough` review record `multi: true` while one reviewer ran. Breadth is the separate
+ *  multi-reviewer mode (§8.3), asked for on its own and combined with any tier. Its $8 target is
+ *  unchanged and still unmeasured for one reviewer (§8.1): the measured three-reviewer runs cost
+ *  $2.84 and $5.91 at per-token API prices (§8), so it is a target with headroom.
  *  `maxFindings` is not in the design text; it is the cap the findings schema puts on the model,
  *  50 being well above the 5 findings the most productive measured review returned, so it is a
  *  runaway guard and not a quality lever.
@@ -130,7 +133,7 @@ export const defaultDeploymentConfig = (): DeploymentConfig => ({
     // NOT move (decision 16): the check pass has its own budget, a quarter of this target.
     basic: { agents: 1, effort: 'low', check: true, budgetUsd: 2 },
     normal: { agents: 1, effort: 'medium', check: true, budgetUsd: 3 },
-    thorough: { agents: 3, effort: 'high', check: true, budgetUsd: 8 },
+    thorough: { agents: 1, effort: 'high', check: true, budgetUsd: 8 },
   },
   severity: { bands: { critical: 9, high: 7, medium: 4 }, postInlineAtOrAbove: 5 },
   report: {

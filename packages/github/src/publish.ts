@@ -5,7 +5,7 @@ import {
   type RecheckJudgement, type ReportMode, type ReviewOutput,
 } from '@review-agent/core'
 import { anchorFindings } from './anchor'
-import { inlineBody, reinstatementNote, retractionNote, reviewBody, summaryBody } from './body'
+import { inlineBody, reinstatementNote, retractionNote, reviewBody, summaryBody, type ReviewVia } from './body'
 import {
   commentIdsIn, findingId, markerRunFor, nextMarkerState, recheckQuestions, reinstatableComments,
   retractableComments, type MarkerState, type PostedFindings,
@@ -52,6 +52,9 @@ export type PublishedReview = {
   completed: boolean
   reviewId: number | null
   summaryCommentId: number | null
+  /** The summary comment's page, as GitHub gave it, or null when none was written or GitHub's
+   *  answer carried none. A commit status links to it (spec 0.2.0 §14.2), and a check run may. */
+  summaryUrl: string | null
   /** What this review says. In `silent` and `check-only` it is what it WOULD have said. */
   said: PostedFindings
   /** `said`, flattened: at the check's severity, never a refuted finding. Task 6's gate reads this. */
@@ -127,8 +130,17 @@ const sameAsk = (derived: PreviousFinding[], asked: PreviousFinding[]): boolean 
 export async function publishReview(a: {
   octokit: Octokit; owner: string; repo: string; number: number
   review: RunReviewResult
-  /** The App's own login, when the deployment knows it: the tie-break of `findSummaryComment`. */
+  /** How this review was run, which the first line of the summary and of the review says (spec
+   *  0.2.0 §5.6, decision §14.9): every way in, the App included, says it is automated. Required, so
+   *  no caller gets a line that describes some other way in. */
+  via: ReviewVia
+  /** The login about to post, when the caller knows it: a summary comment it wrote is preferred
+   *  over any other carrying a marker (`findSummaryComment`, spec 0.2.0 §14.7). */
   selfLogin?: string
+  /** The App's own bot login, when the caller knows it: replies from it are not a person's answer.
+   *  Nobody else's are skipped, so a person who posted the review can `/dispute` its findings (spec
+   *  0.2.0 §3.3, decision §14.6). */
+  ignoreRepliesFrom?: string
   /** What the comment doorway refused before the resolver saw it, already phrased (Task 10, Criss
    *  decision 4). Rendered in the summary after the resolver's own `droppedRequestKeys`.  */
   refused?: string[]
@@ -185,8 +197,10 @@ export async function publishReview(a: {
   //    written: the listing then holds no comment of this review's, and a failed read leaves nothing
   //    half-posted. With no previous comments, fetchThreadReplies spends no request.
   // Replies only settle a previous run, and a review that did not complete settles nothing (step 7).
-  const replies = !completed ? [] : await fetchThreadReplies(
-    { octokit, owner, repo, number, parentIds: commentIdsIn(previous) })
+  const replies = !completed ? [] : await fetchThreadReplies({
+    octokit, owner, repo, number, parentIds: commentIdsIn(previous),
+    ...(a.ignoreRepliesFrom !== undefined && { ignoreRepliesFrom: a.ignoreRepliesFrom }),
+  })
 
   // 2b. What the re-review pass answered about the findings earlier reviews reported (Criss,
   //     2026-09-16). It has already run — inside `runReview`, where its cost could be recorded — so
@@ -225,8 +239,10 @@ export async function publishReview(a: {
     body: inlineBody(x.finding),
   }))
   // No inline comment, no review: an empty COMMENT review is noise on the pull request. The body
-  // counts nothing, because Task 4 re-sends it with `comments: []` if GitHub refuses them.
-  const reviewText = inline.length === 0 ? null : reviewBody({ headSha })
+  // counts nothing, because Task 4 re-sends it with `comments: []` if GitHub refuses them. It opens
+  // with the same automated-review line as the summary (spec 0.2.0 §5.6).
+  const automated = { via: a.via, tier: settings.tier, model: settings.model, costUsd: record.costUsd }
+  const reviewText = inline.length === 0 ? null : reviewBody({ headSha, ...automated })
 
   // 6. One request carrying every comment (Task 4), and the comment ids read back.
   const posted = !writesInline || reviewText === null
@@ -278,7 +294,7 @@ export async function publishReview(a: {
     ...(a.refused ?? []),
   ]
   const summaryText = summaryBody({
-    headSha, tier: settings.tier, model: settings.model, costUsd: record.costUsd,
+    headSha, ...automated,
     summary: review.result.failure === null && output !== null ? output.summary : unfinishedSummary(review),
     intent: output?.intent ?? NO_INTENT,
     summaryOnly: said.summaryOnly, inconclusive: output?.inconclusive ?? [], marker,
@@ -380,6 +396,7 @@ export async function publishReview(a: {
     completed,
     reviewId: posted?.reviewId ?? null,
     summaryCommentId: summary?.commentId ?? null,
+    summaryUrl: summary?.url ?? null,
     said,
     findings: saidFindings,
     confirmed,

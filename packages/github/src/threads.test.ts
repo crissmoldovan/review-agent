@@ -52,16 +52,56 @@ describe('fetchThreadReplies', () => {
     expect(calls[0].params.since).toBeUndefined()
   })
 
-  it('never reads the bot’s own writing as a human verdict', async () => {
+  it('never reads the bot’s own writing as a human verdict, when the caller names the bot', async () => {
     const { octokit } = fakeOctokit([[
       { id: 101, body: 'Severity 8/10 — the token is logged', user: BOT },
       { id: 105, body: '/dispute my own finding', in_reply_to_id: 101, user: BOT },
       { id: 106, body: 'fixing now', in_reply_to_id: 101, user: HUMAN },
     ]])
     const replies = await fetchThreadReplies({
-      octokit, owner: 'acme', repo: 'widgets', number: 16, parentIds: [101],
+      octokit, owner: 'acme', repo: 'widgets', number: 16, parentIds: [101], ignoreRepliesFrom: BOT.login,
     })
     expect(replies).toEqual([{ commentId: 101, body: 'fixing now' }])
+  })
+
+  it('matches the named bot whatever the case, as GitHub matches logins', async () => {
+    const { octokit } = fakeOctokit([[
+      { id: 101, body: 'Severity 8/10', user: BOT },
+      { id: 105, body: '/dispute my own finding', in_reply_to_id: 101, user: BOT },
+    ]])
+    const replies = await fetchThreadReplies({
+      octokit, owner: 'acme', repo: 'widgets', number: 16, parentIds: [101], ignoreRepliesFrom: 'Review-Agent[BOT]',
+    })
+    expect(replies).toEqual([])
+  })
+
+  it('hears the person who posted the review dispute its finding (spec 0.2.0 §3.3, decision §14.6)', async () => {
+    // A person posting a review as themselves (`review-agent review --post`) is the author of every
+    // comment it placed. Until 0.2.0 the author of the parent comments was treated as the bot, so
+    // their own `/dispute` under their own review's finding was dropped in silence. Only an explicit
+    // bot login is ignored now, and a person posting passes none.
+    const { octokit } = fakeOctokit([[
+      { id: 101, body: 'Severity 8/10 — the token is logged', user: HUMAN },
+      { id: 102, body: '/dispute this logger is scrubbed downstream', in_reply_to_id: 101, user: HUMAN },
+    ]])
+    const replies = await fetchThreadReplies({
+      octokit, owner: 'acme', repo: 'widgets', number: 16, parentIds: [101],
+    })
+    expect(replies).toEqual([{ commentId: 101, body: '/dispute this logger is scrubbed downstream' }])
+  })
+
+  it('ignores nobody when it is told nobody, the bot included', async () => {
+    // This product never replies under its own comments — it posts top-level comments and edits them
+    // — so a bot reply is somebody else's automation, and an App that does not know its own login
+    // passes nothing rather than guessing one.
+    const { octokit } = fakeOctokit([[
+      { id: 101, body: 'Severity 8/10', user: BOT },
+      { id: 105, body: 'a note', in_reply_to_id: 101, user: BOT },
+    ]])
+    const replies = await fetchThreadReplies({
+      octokit, owner: 'acme', repo: 'widgets', number: 16, parentIds: [101], ignoreRepliesFrom: '',
+    })
+    expect(replies).toEqual([{ commentId: 101, body: 'a note' }])
   })
 
   it('counts a reply to a reply against the thread it is in', async () => {

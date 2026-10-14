@@ -1,4 +1,5 @@
 import { createPrivateKey, createSign } from 'node:crypto'
+import { GITHUB_API_VERSION } from '@review-agent/github'
 import { z } from 'zod'
 
 /** The App's CLIENT id (`Iv23li…`), not the numeric App id: GitHub's own guidance for the JWT
@@ -70,9 +71,10 @@ const privateKeyOf = (identity: AppIdentity) => {
   }
 }
 
-/** Current GitHub docs examples send this header. Pinning it deliberately (rather than letting the
- *  API default drift) means a future breaking version cannot arrive without a diff in this repo. */
-export const GITHUB_API_VERSION = '2026-03-10'
+/** The pinned GitHub API version. Defined in `@review-agent/github` since 0.2.0, where every way in
+ *  builds its client (`octokitFor`, spec 0.2.0 §3.1); re-exported here because the token request
+ *  below sends the same header and this package has always offered the constant. */
+export { GITHUB_API_VERSION }
 
 /** GitHub's documented cap on the `repositories` array of a scoped token request. */
 export const MAX_SCOPED_REPOSITORIES = 500

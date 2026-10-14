@@ -12,6 +12,7 @@ import {
   commentIdsIn, decodeMarker, encodeMarker, findingId, recheckQuestions, type MarkerState,
 } from './marker'
 import type { PullRequestContext } from './pr'
+import type { ReviewVia } from './body'
 import { publishReview } from './publish'
 import type { RecheckResult, RunReviewResult } from './run-review'
 
@@ -22,6 +23,8 @@ const OLD_SHA = '1'.repeat(40)
 
 const BOT = { login: 'review-agent[bot]' }
 const HUMAN = { login: 'crissmoldovan' }
+/** How the App's runner says it ran: the line every body opens with (spec 0.2.0 §5.6). */
+const APP: ReviewVia = { kind: 'app' }
 
 // A real directory, because anchorFindings checks every model-written path against the files that
 // are really there (design §4.3) AND reads the line each finding points at, to hash it. A one-line
@@ -172,6 +175,8 @@ const fakeGitHub = (seed: {
   refuseInlineWith?: number
   /** An HTTP status every retraction edit is refused with. */
   refuseRetractionWith?: number
+  /** An HTTP status the summary comment's edit is refused with. */
+  refuseSummaryEditWith?: number
 } = {}) => {
   const calls: Call[] = []
   const issueComments = [...(seed.issueComments ?? [])]
@@ -189,9 +194,12 @@ const fakeGitHub = (seed: {
     if (route === SUMMARY_LIST) return { status: 200, headers: {}, data: pageOf(issueComments, params) }
     if (route === SUMMARY_CREATE) {
       issueComments.push({ id: 8100, body: String(params.body), user: BOT })
-      return { status: 201, headers: {}, data: { id: 8100 } }
+      return { status: 201, headers: {}, data: { id: 8100, html_url: 'https://github.com/acme/widgets/pull/16#issuecomment-8100' } }
     }
     if (route === SUMMARY_EDIT) {
+      if (seed.refuseSummaryEditWith !== undefined) {
+        throw Object.assign(new Error('Forbidden'), { status: seed.refuseSummaryEditWith })
+      }
       const edited = issueComments.find((c) => c.id === params.comment_id)
       if (edited !== undefined) edited.body = String(params.body)
       return { status: 200, headers: {}, data: { id: params.comment_id } }
@@ -247,14 +255,14 @@ const only = (calls: Call[], route: string): Call[] => calls.filter((c) => c.rou
 const writes = (calls: Call[]): string[] => calls.map((c) => c.route).filter((r) => !r.startsWith('GET '))
 
 const publish = (octokit: Octokit, review: RunReviewResult) =>
-  publishReview({ octokit, owner: 'acme', repo: 'widgets', number: 16, review })
+  publishReview({ octokit, owner: 'acme', repo: 'widgets', number: 16, review, via: APP })
 
 /** How the app calls it on a re-review: the marker was read BEFORE the review, to build the
  *  re-review pass's question, and the same one is handed on here so a judgement's index addresses
  *  the rows it was computed about. */
 const publishWith = (octokit: Octokit, review: RunReviewResult, marker: MarkerState | null) =>
   publishReview({
-    octokit, owner: 'acme', repo: 'widgets', number: 16, review,
+    octokit, owner: 'acme', repo: 'widgets', number: 16, review, via: APP,
     existing: marker === null ? null : { commentId: 9002, marker },
   })
 
@@ -346,9 +354,93 @@ describe('publishReview: from a finished review to a posted one', () => {
   it('refuses to put a review onto a pull request it was not about, before asking GitHub anything', async () => {
     const gh = fakeGitHub()
     await expect(publishReview({
-      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 17, review: reviewed(),
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 17, review: reviewed(), via: APP,
     })).rejects.toThrow('refusing to publish a review of acme/widgets#16 onto acme/widgets#17')
     expect(gh.calls).toEqual([])
+  })
+})
+
+describe('publishReview: every body says it is automated, and how it ran (spec 0.2.0 §5.6)', () => {
+  it('opens the summary and the review with the line, naming the person who ran it', async () => {
+    const gh = fakeGitHub()
+    await publishReview({
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(),
+      via: { kind: 'cli', login: 'alice' },
+    })
+    const line = '🤖 **Automated review** by [review-agent](https://github.com/crissmoldovan/review-agent) · ' +
+      'run by @alice from the command line · tier **basic** · `claude-opus-5` · $0.94 (model spend at per-token API prices)'
+    expect(String(only(gh.calls, SUMMARY_CREATE)[0].params.body).split('\n')[0]).toBe(line)
+    expect(String(only(gh.calls, REVIEW_CREATE)[0].params.body).split('\n')[0]).toBe(line)
+  })
+
+  it('says so on the App\'s own reviews too (decision §14.9)', async () => {
+    const gh = fakeGitHub()
+    const out = await publish(gh.octokit, reviewed())
+    expect(out.bodies.summary.split('\n')[0]).toContain(' · GitHub App · ')
+    expect(out.bodies.review?.split('\n')[0]).toContain(' · GitHub App · ')
+  })
+
+  it('hands back the summary comment\'s page, as GitHub gave it', async () => {
+    const out = await publish(fakeGitHub().octokit, reviewed())
+    expect(out.summaryUrl).toBe('https://github.com/acme/widgets/pull/16#issuecomment-8100')
+  })
+
+  it('has no page to hand back when the mode writes no summary', async () => {
+    const out = await publish(fakeGitHub().octokit, reviewed({ mode: 'check-only' }))
+    expect(out.summaryUrl).toBeNull()
+  })
+})
+
+describe('publishReview: posted by a person (spec 0.2.0 §3.3)', () => {
+  const lastState: MarkerState = {
+    version: 1,
+    runs: [{
+      headSha: OLD_SHA, at: '2026-09-13T10:00:00.000Z',
+      findings: [
+        { id: findingId(INLINE), file: INLINE.file, line: 100, severity: 6, title: INLINE.title, commentId: 101, outcome: 'open' },
+      ],
+    }],
+  }
+  /** The review alice posted last time, and her own answer under it. */
+  const hers = (author: { login: string }): ReviewCommentOnWire[] => [
+    { id: 101, path: INLINE.file, line: 100, body: '**Severity 6/10** · security', pull_request_review_id: 700, in_reply_to_id: null, user: author },
+    { id: 102, path: INLINE.file, line: 100, body: '/dispute only maintainers can push tags', pull_request_review_id: 701, in_reply_to_id: 101, user: author },
+  ]
+  const written = (gh: ReturnType<typeof fakeGitHub>) =>
+    decodeMarker(String(only(gh.calls, SUMMARY_EDIT)[0].params.body))?.runs[0].findings[0].outcome
+
+  it('hears the person who posted the review dispute its finding (decision §14.6)', async () => {
+    // She is the author of the comment and of the reply. Until 0.2.0 the author of the reviewed
+    // comments was taken for the bot, and her `/dispute` was dropped.
+    const gh = fakeGitHub({ issueComments: [previousSummary(lastState)], reviewComments: hers(HUMAN) })
+    await publishReview({
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(),
+      via: { kind: 'cli', login: HUMAN.login }, existing: { commentId: 9002, marker: lastState },
+    })
+    expect(written(gh)).toBe('disputed')
+  })
+
+  it('passes the bot login it is given to the reply reader, and skips only that one', async () => {
+    const gh = fakeGitHub({ issueComments: [previousSummary(lastState)], reviewComments: hers(BOT) })
+    await publishReview({
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(),
+      via: APP, ignoreRepliesFrom: BOT.login, existing: { commentId: 9002, marker: lastState },
+    })
+    expect(written(gh)).toBe('open')
+  })
+
+  it('posts a summary of its own when GitHub will not let it edit the one it found (decision §14.7)', async () => {
+    // The marker comment found is the App's; a person's token may comment and may not edit it. The
+    // review was paid for, so it is posted rather than lost, and carries the history forward.
+    const gh = fakeGitHub({ issueComments: [previousSummary(lastState)], reviewComments: hers(BOT), refuseSummaryEditWith: 403 })
+    const out = await publishReview({
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(),
+      via: { kind: 'cli', login: HUMAN.login }, existing: { commentId: 9002, marker: lastState },
+    })
+    expect(only(gh.calls, SUMMARY_EDIT)).toHaveLength(1)
+    expect(only(gh.calls, SUMMARY_CREATE)).toHaveLength(1)
+    expect(out.summaryCommentId).toBe(8100)
+    expect(decodeMarker(String(only(gh.calls, SUMMARY_CREATE)[0].params.body))?.runs).toHaveLength(2)
   })
 })
 
@@ -835,7 +927,7 @@ describe('publishReview: what the gate and the summary are handed (Criss, decisi
   it('names in the summary what the comment asked for and did not get', async () => {
     const gh = fakeGitHub()
     await publishReview({
-      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(),
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', number: 16, review: reviewed(), via: APP,
       refused: ['`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.'],
     })
     const body = String(only(gh.calls, SUMMARY_CREATE)[0].params.body)
@@ -1183,8 +1275,9 @@ describe('publishReview: retracting the comment of a finding judged resolved', (
 
   it('will not write on a comment that is not on this pull request', async () => {
     // The marker is read out of a pull-request comment, and `findSummaryComment` takes the first one
-    // carrying a marker that decodes — it filters by author only when a deployment passes
-    // `selfLogin`, and none does. So `commentId` is a number from whoever commented first, and
+    // carrying a marker that decodes — it prefers an author only when the caller passes `selfLogin`,
+    // and falls back to any (spec 0.2.0 §14.7). So `commentId` can be a number from whoever commented
+    // first, and
     // `PATCH /repos/{o}/{r}/pulls/comments/{id}` is scoped to the REPOSITORY: nothing in that
     // request names a pull request. One planted comment aimed this edit at any review comment in the
     // repository, including a person's, on a pull request this review never read.

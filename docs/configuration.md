@@ -57,7 +57,7 @@ A tier is a named preset. A request picks one; the default is `basic`.
 |---|---|---|---|---|---|
 | `basic` | `low` | on | $2.00 | $5.00 | where every automatic review and a bare `/review` land |
 | `normal` | `medium` | on | $3.00 | $7.50 | |
-| `thorough` | `high` | on | $8.00 | $20.00 | **not usable from the App**: the multi-reviewer fan-out is not built. The CLI accepts it and runs one reviewer |
+| `thorough` | `high` | on | $8.00 | $20.00 | one reviewer at `high` effort, in the App and the CLI alike (since 0.2.0). Not measured yet |
 
 All figures are at **per-token API prices** — what an Anthropic API key would be billed. With a subscription token the
 same amounts are drawn from the subscription's allowance instead.
@@ -168,12 +168,12 @@ Please look hard at the migration: it runs on a table with 40M rows.
 
 | Flag | Values | Effect |
 |---|---|---|
-| `--tier` | `basic` \| `normal` | the tier. `--tier thorough` is refused and named in the summary |
+| `--tier` | `basic` \| `normal` \| `thorough` | the tier |
 | `--effort` | `low` \| `medium` \| `high` \| `xhigh` \| `max` | the effort |
 | `--model` | any name | the model |
 | `--budget` | dollars | a **lower** soft budget; a higher one is ignored and named in the summary |
 | `--check` / `--skip-check` | — | turn the check pass on or off; if both appear, the last wins |
-| `--multi` | — | refused and named in the summary: the fan-out is not built |
+| `--multi` | — | refused and named in the summary: the multi-reviewer mode is not built yet |
 
 `--flag=value` works too. Every word on the first line that is not a flag, and every line after it, becomes the
 **brief**: a note to the reviewer, fenced off as data in its prompt. An invalid value is not used, and the summary

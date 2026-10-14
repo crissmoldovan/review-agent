@@ -44,7 +44,7 @@ The retry logic moved into the client. Check every caller still handles a 429.
 
 | Flag | Values | What it does |
 |---|---|---|
-| `--tier` | `basic`, `normal` | a bigger preset: more effort and a larger budget. See [tiers](configuration.md#tiers) |
+| `--tier` | `basic`, `normal`, `thorough` | a bigger preset: more effort and a larger budget. See [tiers](configuration.md#tiers) |
 | `--effort` | `low`, `medium`, `high`, `xhigh`, `max` | how hard the model thinks |
 | `--model` | a model name | which model reviews |
 | `--budget` | dollars | a **lower** budget for this review |
@@ -52,8 +52,8 @@ The retry logic moved into the client. Check every caller still handles a 429.
 
 `--flag=value` also works. A flag the deployment does not allow, or a value a flag does not take, is **not silently
 dropped**: the review runs at the deployment's setting, and the summary lists what was not honoured and why under
-**Not honoured**. `--tier thorough` and `--multi` are always listed there for now, because the multi-reviewer mode
-they ask for is not built.
+**Not honoured**. `--multi` is always listed there for now, because the multi-reviewer mode it asks for is not
+built yet. `--tier thorough` is one reviewer at `high` effort and is honoured like the other tiers.
 
 The note — the words on the first line that are not flags, and every following line — is passed to the reviewer as
 information. It can point attention somewhere; it cannot change the reviewer's rules.
@@ -84,9 +84,16 @@ With the default `inline+summary` mode, one review produces three things.
 ### 1. A summary comment
 
 **One per pull request, edited in place** each time the pull request is reviewed again, so the conversation is not
-filled with copies. It says:
+filled with copies. It opens with one line saying it is automated and how it was run, for example:
 
-- which commit was reviewed, the tier, the model and what the review cost (model spend at per-token API prices);
+> 🤖 **Automated review** by [review-agent](https://github.com/crissmoldovan/review-agent) · GitHub App · tier
+> **basic** · `claude-opus-5` · $0.21 (model spend at per-token API prices)
+
+— `GitHub App` for the App's reviews. A review posted another way names that instead: `run by @alice from the
+command line` when a person posted it with their own token, `via the SDK` when a service did. Such a review appears
+under the poster's name, and this line is what says they did not write it. Then the summary says:
+
+- which commit was reviewed;
 - the reviewer's summary of the change, and its **intent** verdict — whether the change does what its description
   says (`matches`, `partial`, `diverges` or `unclear`);
 - **Not placed inline**: findings that could not go on a line, with their severity, file and line;
@@ -94,6 +101,11 @@ filled with copies. It says:
 - **Not honoured**: anything a request asked for that was not done.
 
 It also carries a hidden marker: the reviewer's memory of earlier reviews of this pull request. Don't edit it.
+
+When more than one way in reviews the same pull request — the App, and a person posting with their own token — each
+prefers the summary comment it posted itself, when it knows its own GitHub login. One that GitHub will not let edit
+the summary it found (a person may not edit the App's comment) posts a summary of its own instead of failing,
+carrying the earlier reviews' memory forward.
 
 ### 2. Inline comments
 
@@ -113,8 +125,8 @@ Evidence:
 and, when the fix is small, a `suggestion` block you can apply from GitHub's interface (up to 20 lines, and only
 when it replaces exactly the lines commented on; otherwise the fix is shown as plain code).
 
-The inline comments arrive as one **review** with the state "Commented". The reviewer **never approves and never
-requests changes**.
+The inline comments arrive as one **review** with the state "Commented", whose text opens with the same automated
+line as the summary. The reviewer **never approves and never requests changes**.
 
 Which findings become inline comments:
 
@@ -158,7 +170,8 @@ The reply's **first line** must start with the word; anything after it is free t
 What an answer does: it is recorded against that finding in the reviewer's memory of the pull request, and a later
 review **does not ask the model about it again** — a person's word outranks the model's. It is also carried on the
 [review record](how-it-works.md#the-review-record), so a deployment can collect it. It does not change the comment,
-and anyone who can reply can answer.
+and anyone who can reply can answer — including the person who posted the review, when it was posted with their own
+token: their `/dispute` counts like anyone else's.
 
 ## Re-reviews
 

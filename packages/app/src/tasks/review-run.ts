@@ -1,18 +1,19 @@
 import type { Octokit } from '@octokit/core'
 import {
-  modelCredentialFromEnv, resolveSettings, scanForSecrets, SecretLeak,
+  modelCredentialFromEnv, resolveSettings, SecretLeak,
   type DeploymentConfig, type ReviewRecord, type ReviewRequest,
 } from '@review-agent/core'
 import {
-  checkRunWanted, recheckQuestions, removeCheckout, verdictJson,
+  checkRunWanted, failureSentence, mayRetry, postedCommentsOf, recheckQuestions, refuseUnbuilt,
+  removeCheckout, saidSafely, verdictJson,
   type CheckConclusion, type CheckGate, type CheckOutcome, type closeCheckRunIfInProgress,
   type completeCheckRun, type createCheckRun,
   type fetchPullRequest, type fetchRepoConfig, type findSummaryComment, type FoundSummary,
-  type MarkerState, type PublishCounts, type PublishedReview, type publishReview, type runReview, type RunReviewDeps,
-  type RunReviewResult,
+  type PostedComment, type PublishCounts, type PublishedReview, type publishReview, type runReview,
+  type ReviewVia, type RunReviewDeps, type RunReviewResult,
 } from '@review-agent/github'
 import type { AppIdentity, installationToken } from '../credentials'
-import { encodeRequestRefinement, isAutomatic, refuseUnbuilt, skipAsReleaseOnly } from '../decide'
+import { encodeRequestRefinement, isAutomatic, skipAsReleaseOnly } from '../decide'
 import {
   REVIEW_TASK_ID, idempotencyKeyFor, tagsFor, type ReviewTaskPayload, type TriggerPort,
 } from '../dispatch'
@@ -80,20 +81,15 @@ export type CheckRunMemory = {
   recall: () => number | undefined
 }
 
-/** One posted inline comment, and the finding it carries. `line` is where the comment was PLACED,
- *  which is the line a reply's thread hangs off. */
-export type PostedComment = { findingId: string; file: string; line: number; commentId: number }
+/** The comment each posted finding became, the money rule, and the two sentences a pull request
+ *  reads about a failure are `@review-agent/github`'s since 0.2.0 (spec 0.2.0 §3.1): the review
+ *  session applies them for every way in, and this runner imports the same ones rather than keeping
+ *  a copy that could drift. Re-exported under the names this module has always offered. */
+export { mayRetry, postedCommentsOf, type PostedComment }
 
-/** This run's comments, from the marker `publishReview` just wrote. The marker keeps up to ten runs
- *  and the last one for this head sha is the one this review appended — an earlier review's comments
- *  belong to that review's record, and a reply under one of them is about that review. A finding
- *  with no comment id — summary-only, or an inline comment GitHub refused — has nothing a reply
- *  could hang off, and is left out. */
-export const postedCommentsOf = (published: { headSha: string; marker: MarkerState }): PostedComment[] => {
-  const run = [...published.marker.runs].reverse().find((r) => r.headSha === published.headSha)
-  return (run?.findings ?? []).flatMap((f) =>
-    f.commentId === null ? [] : [{ findingId: f.id, file: f.file, line: f.line, commentId: f.commentId }])
-}
+/** How this runner's reviews say they were run (spec 0.2.0 §5.6, decision §14.9): every summary and
+ *  review the App posts opens with the automated-review line too. */
+const VIA_APP: ReviewVia = { kind: 'app' }
 
 /** What the run hands back — to trigger.dev as a JSON I/O packet, and to `runReviewJob`'s callers
  *  as the ids they need to read the result back off GitHub. `skipped` has no record because no
@@ -199,56 +195,12 @@ const gateOf = (report: DeploymentConfig['report']): CheckGate => ({
   requiresConfirmed: report.gateRequiresConfirmed,
 })
 
-/** May this review be run again, and paid for a second time?
- *  `true` is what makes `reviewTaskRun` start a NEW run of the whole review, model included
- *  (Step 45e). trigger.dev ALSO retries a crashed or evicted attempt itself, up to `MAX_ATTEMPTS` (3,
- *  Criss, 2026-09-18), which this function cannot stop: it only classifies what the task throws.
- *  `costUsd` is the CLI's `total_cost_usd`, computed at per-token API prices; on a subscription
- *  credential the same figure is drawn from the subscription allowance instead of billed. Either
- *  way it is spent, and spending it twice buys nothing. */
-export const mayRetry = (record: ReviewRecord): boolean => {
-  if (record.failure === null) return false
-  if (record.costUsd > 0) return false
-  switch (record.failure.kind) {
-    // The model answered and declined, answered off-schema, or hit its ceiling. All three are
-    // decided by the same prompt over the same commit: attempt two buys the same answer twice.
-    case 'budget': case 'schema': case 'refusal': return false
-    // The CLI died, or reported an error before producing anything, without spending — a killed
-    // child, an overloaded API. The one class a retry can actually fix.
-    case 'crashed': case 'cli-error': return true
-  }
-}
-
-/** Any free text that is about to become a `CheckOutcome.failed.reason`, made safe to render.
- *  Task 6 prints that reason verbatim into the check run summary, which everyone who can see the
- *  pull request can read. `runReview`'s scan covers the review output and the check verdicts
- *  (Task 1, Step 16) and nothing scans the message of an error a collaborator threw — an octokit
- *  error can quote the request it made, and a token can be in it. Design §4.3: the output is
- *  scanned for secrets before posting. The withheld sentence names no pattern and no location,
- *  because the check run is the public half; `SecretLeak`'s own message already carries those for
- *  the run page. */
-const saidSafely = (s: string): string =>
-  scanForSecrets(s).length > 0 ? 'its text is withheld because it matched a secret pattern' : s
-
-/** One sentence a human reads on the check run. The `cli-error` branch carries the CLI's own words
- *  ("Not logged in · Please run /login"), which is the most useful thing we can say — but it is
- *  model-adjacent text on a posting path, so it gets the same secret scan everything else posted
- *  gets (design §4.3). */
-const failureSentence = (record: ReviewRecord): string => {
-  const f = record.failure
-  if (f === null) return 'the review completed'
-  switch (f.kind) {
-    case 'budget':
-      return `the review stopped at its $${record.settings.budget.ceilingUsd.toFixed(2)} ceiling after $${f.spentUsd.toFixed(2)}`
-    case 'schema': return 'the model could not produce a review in the required shape'
-    case 'refusal': return 'the model answered in prose instead of the review schema'
-    case 'crashed': return `the reviewer process crashed (exit ${String(f.code)})`
-    case 'cli-error':
-      return scanForSecrets(f.message).length > 0
-        ? 'the Claude CLI reported an error; its text is withheld because it matched a secret pattern'
-        : `the Claude CLI reported: ${f.message}`
-  }
-}
+// Whether a failed review may start a NEW run of the whole review, model included (Step 45e), is
+// `mayRetry` — `@review-agent/github`'s since 0.2.0, imported above. trigger.dev ALSO retries a
+// crashed or evicted attempt itself, up to `MAX_ATTEMPTS` (3, Criss, 2026-09-18), which that rule
+// cannot stop: it only classifies what the task throws. `saidSafely` and `failureSentence` came with
+// it, for the same reason: the check run here and the report a session writes say the same
+// sentences, scanned the same way (design §4.3).
 
 /** 100 KB against trigger.dev's 128 KB (131,072-byte) I/O packet cap. A record is findings plus
  *  usage and carries no transcript, but `report.maxFindings` is 50 and nothing bounds an
@@ -350,12 +302,12 @@ const reviewOnce = async (
 
   const { owner, repo } = splitRepo(payload.request.repo)
   const number = payload.request.pr
-  // Criss, 2026-09-14 (decision 4): `thorough` and `multi` are not honoured until the fan-out is
-  // built, by whatever road they arrived. The comment parser refuses them and so does the Re-run
-  // branch (Task 10); a payload triggered by hand reaches here past both, where `thorough` would
-  // buy an $8 target and a $20 ceiling at per-token API prices. Stripped before anything is
+  // Criss, 2026-09-14 (decision 4): `multi` is not honoured until the multi-reviewer mode is built,
+  // by whatever road it arrived. The comment parser refuses it and so does the Re-run branch
+  // (Task 10); a payload triggered by hand reaches here past both. Stripped before anything is
   // resolved, so the settings, the check run's external_id and runReview all see the request
-  // without them — and named in the summary through `refusedByDoorway` below.
+  // without it — and named in the summary through `refusedByDoorway` below. `thorough` used to be
+  // stripped with it; since 0.2.0 it is one reviewer at `high` effort and is honoured (§14.1).
   const unbuilt = refuseUnbuilt(payload.request)
   const request: ReviewRequest = {
     ...unbuilt.request,
@@ -440,10 +392,10 @@ const reviewOnce = async (
   }
 
   // Task 10's refusals, carried to the summary (Criss, decision 4): the comment doorway's, and the
-  // ones refuseUnbuilt made at the top of this function for a payload that carried `thorough` or
-  // `multi` itself. A flag the comment doorway dropped never reached resolveSettings, so this is
-  // the only road by which it is ever named. De-duplicated, because a hand-built payload can carry
-  // a refusal sentence and the flag it refuses.
+  // one refuseUnbuilt made at the top of this function for a payload that carried `multi` itself.
+  // A flag the comment doorway dropped never reached resolveSettings, so this is the only road by
+  // which it is ever named. De-duplicated, because a hand-built payload can carry a refusal sentence
+  // and the flag it refuses.
   const refusals = [...new Set([...(payload.refused ?? []), ...unbuilt.refused])]
   const refusedByDoorway = refusals.length === 0 ? {} : { refused: refusals }
 
@@ -690,7 +642,7 @@ const reviewOnce = async (
       // comment in place (Task 5's upsert), so the noise is bounded at the one comment already there.
       const sentence = failureSentence(record)
       try {
-        await deps.publishReview({ octokit, owner, repo, number, review, ...refusedByDoorway, ...publishExisting })
+        await deps.publishReview({ octokit, owner, repo, number, review, via: VIA_APP, ...refusedByDoorway, ...publishExisting })
       } catch (e) {
         // The reason the review stopped is the more useful thing to say, so a failure to write the
         // summary is logged and does not replace it on the check run.
@@ -721,7 +673,7 @@ const reviewOnce = async (
     // `record.cutShort` carry the cut, and the metric's `outcome` attribute is `budget`.
     let published: PublishedReview
     try {
-      published = await deps.publishReview({ octokit, owner, repo, number, review, ...refusedByDoorway, ...publishExisting })
+      published = await deps.publishReview({ octokit, owner, repo, number, review, via: VIA_APP, ...refusedByDoorway, ...publishExisting })
     } catch (e) {
       // Another run repeats the whole review, not the line: one here would re-run the model and pay
       // for it a second time because GitHub had a bad minute, so this is a DoNotRetry and starts no
@@ -753,8 +705,9 @@ const reviewOnce = async (
       // in the comment at the top of the pull request. Counting only `inline` would under-report
       // what the review said, and most on the pull requests where the anchors had drifted.
       posted: published.counts.inline + published.counts.summaryOnly,
-      // Task 5 returns a comment id and no URL, and assembling one from a format string would be
-      // invented. v0 links nothing from the check run; the summary comment is on the same page.
+      // `publishReview` hands back GitHub's own link since 0.2.0 (`published.summaryUrl`), and the
+      // review session links it. This runner moves onto the session in 0.2.0's Stage 6, and its
+      // check runs change then and not before: until that stage it links nothing, as v0 did.
       summaryUrl: null,
     }
     const conclusion = await complete(outcome)

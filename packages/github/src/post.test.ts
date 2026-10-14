@@ -13,6 +13,8 @@ type Canned = {
   failCreateWith?: number
   /** An HTTP status the summary-comment EDIT is refused with. */
   failIssueEditWith?: number
+  /** An HTTP status the summary-comment CREATE is refused with. */
+  failIssueCreateWith?: number
   /** An HTTP status EVERY create call throws. The only way to exercise a *repeated* refusal, which
    *  is what tells a bounded retry from an unbounded one. */
   failEveryCreateWith?: number
@@ -50,13 +52,17 @@ const fakeOctokit = (canned: Canned = {}) => {
       return { status: 200, headers: {}, data: (canned.issueCommentPages ?? [[]])[page - 1] ?? [] }
     }
     if (route === 'POST /repos/{owner}/{repo}/issues/{issue_number}/comments') {
-      return { status: 200, headers: {}, data: { id: canned.newIssueCommentId ?? 8000 } }
+      if (canned.failIssueCreateWith !== undefined) {
+        throw Object.assign(new Error('Forbidden'), { status: canned.failIssueCreateWith })
+      }
+      const id = canned.newIssueCommentId ?? 8000
+      return { status: 201, headers: {}, data: { id, html_url: pageOf(id) } }
     }
     if (route === 'PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}') {
       if (canned.failIssueEditWith !== undefined) {
         throw Object.assign(new Error('Not Found'), { status: canned.failIssueEditWith })
       }
-      return { status: 200, headers: {}, data: { id: params.comment_id } }
+      return { status: 200, headers: {}, data: { id: params.comment_id, html_url: pageOf(Number(params.comment_id)) } }
     }
     throw new Error(`the fake was asked for a route the product should not call: ${route}`)
   }
@@ -64,6 +70,11 @@ const fakeOctokit = (canned: Canned = {}) => {
 }
 
 const routeCalls = (calls: Call[], route: string) => calls.filter((c) => c.route === route)
+
+/** The page GitHub gives an issue comment, in the shape its `html_url` takes. */
+function pageOf(id: number): string {
+  return `https://github.com/acme/widgets/pull/16#issuecomment-${id}`
+}
 
 const comment = (over: Partial<InlineComment> = {}): InlineComment => ({
   findingId: 'a1b2c3d4e5f6',
@@ -399,7 +410,9 @@ describe('upsertSummaryComment: a pull request never collects a wall of bot comm
   it('creates the summary comment on a first review', async () => {
     const { octokit, calls } = fakeOctokit({ issueCommentPages: [[]], newIssueCommentId: 8100 })
     const out = await upsert(octokit, botBody('4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'))
-    expect(out).toEqual({ commentId: 8100, created: true })
+    // GitHub's own link to it, read off the answer rather than assembled: a commit status links to
+    // it (spec 0.2.0 §14.2).
+    expect(out).toEqual({ commentId: 8100, created: true, url: pageOf(8100) })
     expect(routeCalls(calls, CREATE)).toHaveLength(1)
     expect(routeCalls(calls, EDIT)).toHaveLength(0)
   })
@@ -452,7 +465,7 @@ describe('upsertSummaryComment: a pull request never collects a wall of bot comm
       ]],
     })
     const out = await upsert(octokit, botBody('4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'))
-    expect(out).toEqual({ commentId: 9002, created: false })
+    expect(out).toEqual({ commentId: 9002, created: false, url: pageOf(9002) })
     expect(routeCalls(calls, CREATE)).toHaveLength(0)
     expect(routeCalls(calls, EDIT)).toHaveLength(1)
     expect(routeCalls(calls, EDIT)[0].params.comment_id).toBe(9002)
@@ -481,7 +494,7 @@ describe('upsertSummaryComment: a pull request never collects a wall of bot comm
       newIssueCommentId: 8200,
     })
     const out = await upsert(octokit, botBody('4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'))
-    expect(out).toEqual({ commentId: 8200, created: true })
+    expect(out).toEqual({ commentId: 8200, created: true, url: pageOf(8200) })
     expect(routeCalls(calls, EDIT)).toHaveLength(0)
   })
 
@@ -504,7 +517,7 @@ describe('upsertSummaryComment: a pull request never collects a wall of bot comm
       issueCommentPages: [[issueComment({ id: 9402, body: botBody('0'.repeat(40)), user: null })]],
     })
     const out = await upsert(octokit, botBody('4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'))
-    expect(out).toEqual({ commentId: 9402, created: false })
+    expect(out).toEqual({ commentId: 9402, created: false, url: pageOf(9402) })
   })
 
   it('ignores a login that matches nothing, rather than posting a second comment', async () => {
@@ -544,7 +557,7 @@ describe('upsertSummaryComment: a pull request never collects a wall of bot comm
     const out = await upsert(octokit, botBody('4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'))
     expect(routeCalls(calls, LIST)).toHaveLength(MAX_ISSUE_COMMENT_PAGES)
     // Nothing carrying a marker was found in the pages it did read, so it posts a new summary.
-    expect(out).toEqual({ commentId: 8300, created: true })
+    expect(out).toEqual({ commentId: 8300, created: true, url: pageOf(8300) })
   })
 })
 
@@ -577,6 +590,22 @@ describe('findSummaryComment: the previous review, read back', () => {
     })
     expect(await findSummaryComment({ octokit, ...where })).toBeNull()
   })
+
+  it('prefers the summary the same login posted, so two ways in on one pull request keep to their own (spec 0.2.0 §14.7)', async () => {
+    // The App reviewed first; then alice posted a review of her own from the command line, which
+    // could not edit the App's comment and wrote its own. Each finds its own from then on.
+    const { octokit } = fakeOctokit({
+      issueCommentPages: [[
+        issueComment({ id: 9010, body: botBody('0'.repeat(40)), user: { login: 'review-agent[bot]' } }),
+        issueComment({ id: 9011, body: botBody('1'.repeat(40)), user: { login: 'alice' } }),
+      ]],
+    })
+    expect((await findSummaryComment({ octokit, ...where, selfLogin: 'alice' }))?.commentId).toBe(9011)
+    expect((await findSummaryComment({ octokit, ...where, selfLogin: 'review-agent[bot]' }))?.commentId).toBe(9010)
+    // Somebody new falls back to any summary carrying a marker, so a re-review still has its history.
+    expect((await findSummaryComment({ octokit, ...where, selfLogin: 'bob' }))?.commentId).toBe(9010)
+    expect((await findSummaryComment({ octokit, ...where }))?.commentId).toBe(9010)
+  })
 })
 
 describe('upsertSummaryComment: with the comment the caller already found', () => {
@@ -588,7 +617,7 @@ describe('upsertSummaryComment: with the comment the caller already found', () =
     })
     const found = await findSummaryComment({ octokit, ...where })
     const out = await upsertSummaryComment({ octokit, ...where, body: botBody(HEAD), existing: found })
-    expect(out).toEqual({ commentId: 9002, created: false })
+    expect(out).toEqual({ commentId: 9002, created: false, url: pageOf(9002) })
     expect(routeCalls(calls, LIST)).toHaveLength(1)
     expect(routeCalls(calls, EDIT)[0].params.comment_id).toBe(9002)
   })
@@ -596,7 +625,7 @@ describe('upsertSummaryComment: with the comment the caller already found', () =
   it('creates one when the caller looked and found none, without looking again', async () => {
     const { octokit, calls } = fakeOctokit({ issueCommentPages: [[]], newIssueCommentId: 8300 })
     const out = await upsertSummaryComment({ octokit, ...where, body: botBody(HEAD), existing: null })
-    expect(out).toEqual({ commentId: 8300, created: true })
+    expect(out).toEqual({ commentId: 8300, created: true, url: pageOf(8300) })
     expect(routeCalls(calls, LIST)).toHaveLength(0)
     expect(routeCalls(calls, CREATE)).toHaveLength(1)
   })
@@ -614,21 +643,59 @@ describe('upsertSummaryComment: with the comment the caller already found', () =
       octokit, ...where, body: botBody(HEAD),
       existing: { commentId: 9002, marker: { version: 1, runs: [] } },
     })
-    expect(out).toEqual({ commentId: 8400, created: true })
+    expect(out).toEqual({ commentId: 8400, created: true, url: pageOf(8400) })
     expect(routeCalls(calls, EDIT)).toHaveLength(1)
     expect(routeCalls(calls, CREATE)).toHaveLength(1)
     expect(routeCalls(calls, LIST)).toHaveLength(0)
   })
 
-  it('does not paper over an edit GitHub refused for any other reason', async () => {
-    // A 403 is a permission this deployment does not have, and a second comment would neither fix
-    // it nor be wanted. Only "it is not there" earns a create.
-    const { octokit, calls } = fakeOctokit({ issueCommentPages: [[]], failIssueEditWith: 403 })
+  it('posts its own summary when GitHub will not let it edit the one it found (spec 0.2.0 §14.7)', async () => {
+    // A person posting as themselves finds the App's summary, or a colleague's, by its marker, and
+    // GitHub refuses them the edit. The review is already paid for: it goes in a comment of their
+    // own rather than being lost. Until 0.2.0 this was a failed review.
+    const { octokit, calls } = fakeOctokit({ issueCommentPages: [[]], newIssueCommentId: 8500, failIssueEditWith: 403 })
+    const out = await upsertSummaryComment({
+      octokit, ...where, body: botBody(HEAD),
+      existing: { commentId: 9002, marker: { version: 1, runs: [] } },
+    })
+    expect(out).toEqual({ commentId: 8500, created: true, url: pageOf(8500) })
+    expect(routeCalls(calls, CREATE)[0].params).toMatchObject({ owner: 'acme', repo: 'widgets', issue_number: 16, body: botBody(HEAD) })
+  })
+
+  it('lets the refusal out when the token cannot comment at all, rather than hiding it', async () => {
+    // The 403 on the edit earned one create; a 403 on that too is the real answer, and the one said.
+    const { octokit, calls } = fakeOctokit({ issueCommentPages: [[]], failIssueEditWith: 403, failIssueCreateWith: 403 })
     await expect(upsertSummaryComment({
       octokit, ...where, body: botBody(HEAD),
       existing: { commentId: 9002, marker: { version: 1, runs: [] } },
-    })).rejects.toThrow('Not Found')
-    expect(routeCalls(calls, CREATE)).toHaveLength(0)
+    })).rejects.toMatchObject({ status: 403 })
+    expect(routeCalls(calls, CREATE)).toHaveLength(1)
+  })
+
+  it('does not paper over an edit GitHub refused for any other reason', async () => {
+    // Only "it is not there" and "it is not yours" earn a create. A 422 or a 500 is a fault worth
+    // surfacing, and a second comment would neither fix it nor be wanted.
+    for (const status of [422, 500]) {
+      const { octokit, calls } = fakeOctokit({ issueCommentPages: [[]], failIssueEditWith: status })
+      await expect(upsertSummaryComment({
+        octokit, ...where, body: botBody(HEAD),
+        existing: { commentId: 9002, marker: { version: 1, runs: [] } },
+      })).rejects.toMatchObject({ status })
+      expect(routeCalls(calls, CREATE)).toHaveLength(0)
+    }
+  })
+
+  it('keeps a link only when GitHub gave an http(s) one', async () => {
+    const bare = {
+      request: async (route: string) => route.startsWith('POST')
+        ? { status: 201, headers: {}, data: { id: 8600, html_url: 'javascript:alert(1)' } }
+        : { status: 200, headers: {}, data: { id: 9002 } },
+    } as unknown as Octokit
+    expect(await upsertSummaryComment({ octokit: bare, ...where, body: botBody(HEAD), existing: null }))
+      .toEqual({ commentId: 8600, created: true, url: null })
+    expect(await upsertSummaryComment({
+      octokit: bare, ...where, body: botBody(HEAD), existing: { commentId: 9002, marker: { version: 1, runs: [] } },
+    })).toEqual({ commentId: 9002, created: false, url: null })
   })
 })
 

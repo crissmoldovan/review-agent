@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defaultDeploymentConfig } from '@review-agent/core'
 import { MARKER_OPEN, RERUN_IDENTIFIER } from '@review-agent/github'
-import { MULTI_REFUSED, THOROUGH_REFUSED, decideDelivery, encodeRequestRefinement, isReleaseOnly, parseCommandFlags, skipAsReleaseOnly } from './decide'
+import { MULTI_REFUSED, decideDelivery, encodeRequestRefinement, isReleaseOnly, parseCommandFlags, skipAsReleaseOnly } from './decide'
 
 const deployment = defaultDeploymentConfig()
 
@@ -154,15 +154,30 @@ describe('the flags a comment may carry', () => {
     expect(got.refused.join('\n')).toContain('`--budget lots`')
   })
 
-  it('refuses --tier thorough and --multi until the fan-out is built, and names both', () => {
-    // Criss, 2026-09-14 (decision 4). The fan-out is not built ("What this plan does NOT build"),
-    // so a comment cannot buy it. The review still runs, at the deployment's defaults.
-    const got = parseCommandFlags('--tier thorough --multi --check')
+  it('refuses --multi until the multi-reviewer mode is built, and names it', () => {
+    // Criss, 2026-09-14 (decision 4). The fan-out is not built yet (spec 0.2.0 §8.3), so a comment
+    // cannot buy it. The review still runs, with one reviewer.
+    const got = parseCommandFlags('--multi --check')
     expect(got.request).toEqual({ check: true })
     expect(got.refused).toEqual([
-      '`--tier thorough` — the multi-reviewer fan-out is not built yet, so this review ran at the deployment’s default tier.',
       '`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.',
     ])
+  })
+
+  it('refuses with the github package’s own sentences and function, re-exported for the receiver', async () => {
+    // Moved in 0.2.0 (spec §3.1) so the CLI and the SDK refuse exactly what this receiver refuses.
+    const github = await import('@review-agent/github')
+    const receiver = await import('./receiver')
+    expect(receiver.refuseUnbuilt).toBe(github.refuseUnbuilt)
+    expect(receiver.MULTI_REFUSED).toBe(github.MULTI_REFUSED)
+    expect(receiver.THOROUGH_REFUSED).toBe(github.THOROUGH_REFUSED)
+  })
+
+  it('takes --tier thorough, which is one reviewer at high effort since 0.2.0 (spec §14.1)', () => {
+    // It was refused with --multi while it was going to mean the fan-out. It now buys what it says.
+    const got = parseCommandFlags('--tier thorough --multi')
+    expect(got.request).toEqual({ tier: 'thorough' })
+    expect(got.refused).toEqual([MULTI_REFUSED])
   })
 
   it('leaves the free text alone', () => {
@@ -189,13 +204,14 @@ describe('the flags a comment may carry', () => {
   })
 
   it('carries the refusals on the decision, so they can reach the summary', () => {
-    const body = '/review --tier thorough the migration is the risky part'
+    const body = '/review --multi --tier thorough the migration is the risky part'
     const got = decideDelivery({ delivery: { event: 'issue_comment', payload: commentPayload(body) }, deployment })
 
     expect(got.kind).toBe('review')
-    expect(got.kind === 'review' && got.request.tier).toBeUndefined()
+    expect(got.kind === 'review' && got.request.tier).toBe('thorough')
+    expect(got.kind === 'review' && got.request.multi).toBeUndefined()
     expect(got.kind === 'review' && got.request.brief).toBe('the migration is the risky part')
-    expect(got.kind === 'review' && got.refused).toEqual(['`--tier thorough` — the multi-reviewer fan-out is not built yet, so this review ran at the deployment’s default tier.'])
+    expect(got.kind === 'review' && got.refused).toEqual(['`--multi` — the multi-reviewer fan-out is not built yet, so one reviewer ran.'])
   })
 })
 
@@ -305,11 +321,11 @@ describe('decideDelivery on the check run Re-run action', () => {
     expect(got.kind === 'review' && got.refused).toBeUndefined()
   })
 
-  it('refuses a thorough tier or the fan-out a check run carried, runs at the default, and names both', () => {
-    // Criss, 2026-09-14 (decision 4). The comment parser never lets `thorough` or `multi` onto a
-    // request, but external_id is a string that came back from GitHub, and a Re-run that repeated
-    // `thorough` would buy an $8 target and a $20 ceiling at per-token API prices for a fan-out that
-    // does not exist.
+  it('repeats a thorough tier a check run carried, refuses the fan-out, and names it', () => {
+    // Criss, 2026-09-14 (decision 4). The comment parser never lets `multi` onto a request, but
+    // external_id is a string that came back from GitHub, and a Re-run that repeated it would ask
+    // for a fan-out that does not exist yet. `thorough` is one reviewer at high effort since 0.2.0
+    // (spec §14.1), and a Re-run repeats it like any other tier.
     const external_id = encodeRequestRefinement({
       repo: 'acme/widgets', pr: 25, headSha: 'older', tier: 'thorough', multi: true, check: true,
     })
@@ -318,10 +334,10 @@ describe('decideDelivery on the check run Re-run action', () => {
     })
     const got = decideDelivery({ delivery: { event: 'check_run', payload }, deployment })
 
-    expect(got.kind === 'review' && got.request.tier).toBeUndefined()
+    expect(got.kind === 'review' && got.request.tier).toBe('thorough')
     expect(got.kind === 'review' && got.request.multi).toBeUndefined()
     expect(got.kind === 'review' && got.request.check).toBe(true)
-    expect(got.kind === 'review' && got.refused).toEqual([THOROUGH_REFUSED, MULTI_REFUSED])
+    expect(got.kind === 'review' && got.refused).toEqual([MULTI_REFUSED])
   })
 
   it('ignores a different action button, and a check_run event that is not a button press', () => {

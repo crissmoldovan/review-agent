@@ -37,6 +37,35 @@ released together, at the same version.
 - **Ctrl-C stops a CLI review** and the Claude process with it, and deletes the downloaded code; a second Ctrl-C
   exits at once with `130`.
 
+### Stage 2 — one review session
+
+- **`thorough` works everywhere.** It is one reviewer at `high` effort ($8 soft budget, $20 ceiling, not yet measured)
+  in the App as in the CLI: a `/review --tier thorough` and a Re-run that carries it are honoured, where both used to
+  be refused. Its preset says `agents: 1`, so its record no longer says `multi: true`. `--multi` is still refused and
+  named in the summary until the multi-reviewer mode is built.
+- **Every summary and review says it is automated.** Their first line is *"🤖 Automated review by review-agent ·
+  GitHub App · tier basic · `claude-opus-5` · $0.21 (model spend at per-token API prices)"* — the tier, model and cost
+  line folded in — with `run by @login from the command line` or `via the SDK` for the other ways in. The App's
+  reviews carry it too.
+- **The person who posted a review can dispute it.** Replies are ignored only from a bot login the caller names; the
+  author of the reviewed comments is no longer taken to be the bot.
+- **A summary comment the poster cannot edit no longer fails the review.** A 403 on the edit posts a new summary, as a
+  404 already did, and the comment found first is the one the poster's own login wrote, when it is known.
+- **`@review-agent/github` runs a whole review.** `prepareReview()` and `runReviewSession()` — the report, the
+  previous marker, the deadline, the review, publishing and deleting the checkout — return `reviewed`, `unfinished` or
+  `failed` with the stage, the spend and whether a retry is safe, and throw only on a programmer's error. The App's
+  runner moves onto it in a later stage; it already shares its money rule and failure sentences (`mayRetry`,
+  `failureSentence`, `saidSafely`, `postedCommentsOf`).
+- **Reporting with a commit status.** `reporterFor()` reports with a check run when the token can create one and a
+  commit status when it cannot, decided with one `GET /user`. A status is a soft gate; a review that did not run
+  reports `success` saying it is not a verdict, one its runner stopped reports `error`, and a `check-only` review with
+  no check run puts its findings in the summary.
+- **Moved to `@review-agent/github`:** `octokitFor` (now with `baseUrl` for GitHub Enterprise Server),
+  `GITHUB_API_VERSION`, `pushAccessOf`, `refuseUnbuilt` and `MULTI_REFUSED`, all still exported where they were; new
+  `defaultRunReviewDeps()`, which the CLI and the runner both start from. The CLI now pins the GitHub API version
+  too. `upsertSummaryComment`, `publishReview` and `createCheckRun` also hand back GitHub's link to what they wrote.
+  `THOROUGH_REFUSED` is deprecated.
+
 ## 0.1.3
 
 ### Fixed

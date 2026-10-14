@@ -157,9 +157,24 @@ export async function postReview(a: {
   return { reviewId: first.reviewId, commentIds, droppedInline: first.droppedInline }
 }
 
-export type SummaryCommentResult = { commentId: number; created: boolean }
+export type SummaryCommentResult = {
+  commentId: number
+  created: boolean
+  /** The comment's page, as GitHub gave it (`html_url`), or null when the answer did not carry one.
+   *  Read rather than assembled: a commit status links to it (spec 0.2.0 §14.2), and a URL built from
+   *  a format string would be an invented one. */
+  url: string | null
+}
 
-const IssueCommentSchema = z.object({ id: z.number().int() })
+const IssueCommentSchema = z.object({ id: z.number().int(), html_url: z.string().optional() })
+
+/** What GitHub answered about a summary comment it created or edited. Only an http(s) URL is kept:
+ *  it is put in front of people as a link. */
+const summaryCommentOf = (data: unknown, created: boolean): SummaryCommentResult => {
+  const c = IssueCommentSchema.parse(data)
+  const url = c.html_url !== undefined && /^https?:\/\//.test(c.html_url) ? c.html_url : null
+  return { commentId: c.id, created, url }
+}
 
 /** Ours, not GitHub's: no cap on this list is documented in what we verified, so this is a loop
  *  guard. 30 x 100 = 3,000 conversation comments on one pull request. */
@@ -184,9 +199,12 @@ export type FoundSummary = { commentId: number; marker: MarkerState }
  *  question about the bot is not mistaken for the bot. The decode is needed to identify the
  *  comment anyway, so its result is kept rather than decoded a second time by the caller.
  *
- *  The `<slug>[bot]` login convention is NOT VERIFIED (research, 2026-09-14), so `selfLogin` is a
- *  secondary signal only: it may narrow a set of marker-carrying comments, and it never identifies
- *  one on its own. */
+ *  `selfLogin` is the login about to post: a marker comment it wrote is PREFERRED, and any decodable
+ *  marker is the fallback (spec 0.2.0 §3.3, decision §14.7). Since 0.2.0 more than one way in can
+ *  post on one pull request — the App, and a person with the CLI — and each would otherwise edit the
+ *  other's summary. It never identifies a comment on its own: a comment without a marker is not a
+ *  summary whoever wrote it, and the `<slug>[bot]` login convention is NOT VERIFIED (research,
+ *  2026-09-14). */
 export async function findSummaryComment(a: {
   octokit: Octokit
   owner: string
@@ -252,35 +270,52 @@ export async function upsertSummaryComment(a: {
       issue_number: a.number,
       body: a.body,
     })
-    return { commentId: IssueCommentSchema.parse(res.data).id, created: true }
+    return summaryCommentOf(res.data, true)
   }
   // Note the path shape: an ISSUE comment is edited at /issues/comments/{id} with no issue number,
   // while a review comment is edited at /pulls/comments/{id}. Mixing the two 404s.
+  let edited: unknown
   try {
-    await a.octokit.request('PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}', {
+    edited = (await a.octokit.request('PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}', {
       owner: a.owner,
       repo: a.repo,
       comment_id: found.commentId,
       body: a.body,
-    })
+    })).data
   } catch (e) {
-    // The comment is gone. `existing` can be MINUTES old: since 2026-09-16 the caller reads the
+    // Two answers earn a NEW comment instead of a failed review, and nothing else does.
+    //
+    // 404 — the comment is gone. `existing` can be MINUTES old: since 2026-09-16 the caller reads the
     // marker BEFORE the review, because the re-review pass's question comes out of it, and a review
     // takes minutes. Somebody deleting the bot's summary in that window would otherwise turn a
     // finished, paid-for review into a 404 out of publishReview, a DoNotRetry, and a review nobody
     // ever saw. A comment that is not there is not a reason to lose a review: write a new one.
     //
-    // ONLY on 404. A 403 is a permission this deployment does not have and a second comment would
-    // neither fix it nor be wanted; anything else is a fault worth surfacing. Narrow on purpose:
-    // the failure mode of getting this wrong is a pull request collecting a wall of bot comments,
-    // which is the thing this whole function exists to prevent.
-    if (statusOf(e) !== 404) throw e
+    // 403 — the comment is somebody else's to edit (spec 0.2.0 §3.3, decision §14.7). Since 0.2.0 a
+    // person can post a review as themselves, and the marker comment found may be the App's, or
+    // another person's: GitHub lets them comment and refuses the edit. That is not a broken review;
+    // the review is already paid for, and their own comment carries it. `findSummaryComment` prefers
+    // the poster's own comment when it knows their login, so the next review by the same person
+    // edits this new one instead of adding another. If the 403 means they cannot comment at all,
+    // the create below is refused too, and that failure is the one surfaced.
+    //
+    // Anything else is a fault worth surfacing. Narrow on purpose: the failure mode of getting this
+    // wrong is a pull request collecting a wall of bot comments, which is the thing this whole
+    // function exists to prevent.
+    const status = statusOf(e)
+    if (status !== 404 && status !== 403) throw e
     const res = await a.octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', {
       owner: a.owner, repo: a.repo, issue_number: a.number, body: a.body,
     })
-    return { commentId: IssueCommentSchema.parse(res.data).id, created: true }
+    return summaryCommentOf(res.data, true)
   }
-  return { commentId: found.commentId, created: false }
+  // The edit's own answer carries the comment's page. A fake or a proxy that answers with less is
+  // not a failed edit: the id is the one that was edited, and the link is simply unknown.
+  const parsed = IssueCommentSchema.safeParse(edited)
+  const url = parsed.success && parsed.data.html_url !== undefined && /^https?:\/\//.test(parsed.data.html_url)
+    ? parsed.data.html_url
+    : null
+  return { commentId: found.commentId, created: false, url }
 }
 
 /** What `retractInlineComment` did. `failed` covers every refusal and every network fault alike:

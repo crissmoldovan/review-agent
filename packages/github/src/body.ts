@@ -54,8 +54,53 @@ export const inlineBody = (f: Finding, fence: string = SUGGESTION_FENCE): string
   return parts.join('\n')
 }
 
+/** Where this product lives, linked from every review it posts so a reader can find out what it is. */
+export const PRODUCT_URL = 'https://github.com/crissmoldovan/review-agent'
+
+/** How a review was run, which the automated-review line says (spec 0.2.0 §5.6). The App's runner
+ *  says `app`; the CLI says `cli` with the login of the token it posted with, when it knows it; an
+ *  SDK host says `sdk`. */
+export type ReviewVia =
+  | { kind: 'app' }
+  | { kind: 'cli'; login?: string | null }
+  | { kind: 'sdk' }
+
+/** A GitHub login as GitHub allows one — letters, digits and single hyphens, at most 39 — or an App's
+ *  bot account, which adds `[bot]`. A login comes from GitHub's answer about a token, so this is not
+ *  distrust of GitHub: it is that the line below renders it as Markdown on a public pull request,
+ *  and anything else in that position would be markup this product did not write. */
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}(?:\[bot\])?$/
+
+const howItRan = (via: ReviewVia): string => {
+  switch (via.kind) {
+    case 'app': return 'GitHub App'
+    case 'sdk': return 'via the SDK'
+    case 'cli': {
+      const login = via.login ?? ''
+      return GITHUB_LOGIN.test(login) ? `run by @${login} from the command line` : 'run from the command line'
+    }
+  }
+}
+
+/** The first line of every summary comment and every review this product posts, whoever posted it
+ *  (spec 0.2.0 §5.6, decision §14.9). A review posted with a person's token appears under their name,
+ *  and a reader must not take a model's review for a colleague's: this says it is automated, by what,
+ *  and how it was run. The tier, model and cost the summary used to print on a line of their own are
+ *  folded in here rather than said twice.
+ *
+ *  The cost is model spend at per-token API prices, as the Claude Code CLI reports it — never a
+ *  subscription allowance and never a price charged to anyone — and the line says so, because an
+ *  unlabelled number on a public pull request is read as a bill. The model's name can come from a
+ *  `/review --model` comment, so it goes through `inlineCode` like any other text this product did
+ *  not write. */
+export const automatedReviewLine = (a: { via: ReviewVia; tier: Tier; model: string; costUsd: number }): string =>
+  `🤖 **Automated review** by [review-agent](${PRODUCT_URL}) · ${howItRan(a.via)} · tier **${a.tier}** · ` +
+  `${inlineCode(a.model)} · $${a.costUsd.toFixed(2)} (model spend at per-token API prices)`
+
 export type SummaryInput = {
   headSha: string
+  /** How this review was run: the automated-review line says it (spec 0.2.0 §5.6). */
+  via: ReviewVia
   tier: Tier
   model: string
   /** What this review cost: model spend at per-token API prices, as the Claude Code CLI reported it
@@ -106,13 +151,13 @@ const checkoutGapLines = (gaps: SummaryInput['checkoutGaps']): string[] => {
 }
 
 /** Design §5: one summary comment naming the commit reviewed, the tier and model, the cost, and any
- *  finding that could not be placed inline. */
+ *  finding that could not be placed inline. It opens with the automated-review line (spec 0.2.0
+ *  §5.6), which carries the tier, the model and the cost. */
 export const summaryBody = (a: SummaryInput): string => {
   const lines: string[] = [
-    `### Review of \`${a.headSha.slice(0, 7)}\``,
+    automatedReviewLine(a),
     '',
-    `Tier **${a.tier}** · model \`${a.model}\` · ` +
-    `cost **$${a.costUsd.toFixed(2)}** (model spend at API token prices)`,
+    `### Review of \`${a.headSha.slice(0, 7)}\``,
     '',
     a.summary,
     '',
@@ -165,7 +210,11 @@ export const summaryBody = (a: SummaryInput): string => {
  *  comments, Task 4 re-posts THIS SAME BODY with `comments: []`, so any count it carried would be
  *  wrong exactly when a reader most needs it to be right. The review points at the summary, which
  *  names every finding including the ones that could not be placed on a line. */
-export const reviewBody = (a: { headSha: string }): string =>
+export const reviewBody = (a: { headSha: string; via: ReviewVia; tier: Tier; model: string; costUsd: number }): string =>
+  // The automated-review line first, as on the summary (spec 0.2.0 §5.6): the review is what carries
+  // the inline comments, and it is what appears under a person's name in the pull request's
+  // timeline. The line counts nothing on the lines either, so the 422 re-post above stays true.
+  `${automatedReviewLine(a)}\n\n` +
   `### Review of \`${a.headSha.slice(0, 7)}\`\n\n` +
   'The summary comment on this pull request has the whole review, including anything that could ' +
   'not be placed on a line.\n'

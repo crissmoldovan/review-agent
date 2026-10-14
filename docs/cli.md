@@ -77,9 +77,9 @@ review-agent review --repo <owner/name> --pr <number> [options]
 
 Notes:
 
-- `--tier thorough` is accepted by the CLI, but the multi-reviewer fan-out it is named for is **not built**: it runs
-  one reviewer at `high` effort with an $8 soft budget ($20 ceiling). The App does not honour it: a request for
-  `thorough` there runs at the default tier, and the summary says so.
+- `--tier thorough` is one reviewer at `high` effort with an $8 soft budget ($20 ceiling), here and in the App
+  (since 0.2.0). Its cost is not measured yet. Several reviewers side by side is a separate multi-reviewer mode,
+  which is not built yet.
 - The CLI uses the [built-in defaults](configuration.md#deployment-settings) and reads no configuration file of its
   own. It **does** read the reviewed repository's [`.review-agent/review.md`](configuration.md#the-repository-file)
   from the pull request's **base** branch, as the App does.

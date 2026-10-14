@@ -33,7 +33,7 @@ The retry logic moved into the client. Check every caller still handles a 429.
   posted to a real pull request through the deployed runner.
 - **New and not yet proven live:** the [re-review pass](docs/pull-requests.md#re-reviews) that asks the model
   whether earlier findings are still present. It is covered by unit tests only.
-- **Not built yet:** a GitHub Action mode, the multi-reviewer `thorough` tier, posting from the CLI, and changing
+- **Not built yet:** a GitHub Action mode, the multi-reviewer mode, posting from the CLI, and changing
   the runner's settings without editing one function.
 - **The same model varies from run to run.** One review is a sample.
 

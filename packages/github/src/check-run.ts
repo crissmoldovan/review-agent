@@ -262,7 +262,7 @@ export const checkRunOutput = (a: {
  *  a `maxDuration` kill, which runs no cleanup hook and so could not complete it from inside. */
 export const STALE_AFTER_MS = 60 * 60 * 1000
 
-const CreatedSchema = z.object({ id: z.number().int() })
+const CreatedSchema = z.object({ id: z.number().int(), html_url: z.string().nullish() })
 const ListSchema = z.object({
   check_runs: z.array(z.object({
     id: z.number().int(),
@@ -367,7 +367,7 @@ export async function closeCheckRunIfInProgress(a: {
 export async function createCheckRun(a: {
   octokit: Octokit; owner: string; repo: string; headSha: string; name: string
   detailsUrl?: string; externalId?: string; now?: Date; staleAfterMs?: number
-}): Promise<{ id: number }> {
+}): Promise<{ id: number; url: string | null }> {
   const { octokit, owner, repo, headSha, name } = a
   const now = a.now ?? new Date()
   try {
@@ -386,7 +386,11 @@ export async function createCheckRun(a: {
     ...(a.detailsUrl !== undefined && { details_url: a.detailsUrl }),
     ...(a.externalId !== undefined && { external_id: a.externalId }),
   })
-  return { id: CreatedSchema.parse(res.data).id }
+  const created = CreatedSchema.parse(res.data)
+  // The check run's page, as GitHub gave it, for a caller that reports where the result is (spec
+  // 0.2.0 §4.3). Null when the answer carried none rather than a URL assembled from a format string.
+  const url = typeof created.html_url === 'string' && /^https?:\/\//.test(created.html_url) ? created.html_url : null
+  return { id: created.id, url }
 }
 
 /** Ends the check run. The PATCH carries no `status`: the documented behaviour is that providing

@@ -50,9 +50,10 @@ Pure, no network. `event` is the `x-github-event` header; `payload` the parsed b
 - `{ kind: 'ignore', why }` — a short reason, for your log.
 
 The rules are in [using it on pull requests](pull-requests.md#when-it-reviews). Helpers it uses are exported too:
-`parseCommandFlags`, `refuseUnbuilt`, `encodeRequestRefinement` / `decodeRequestRefinement` (the settings a
-check run's Re-run button carries), `isReleaseOnly`, `isAutomatic`, `skipAsReleaseOnly`, `HEAD_SHA_UNRESOLVED`,
-`THOROUGH_REFUSED`, `MULTI_REFUSED`.
+`parseCommandFlags`, `encodeRequestRefinement` / `decodeRequestRefinement` (the settings a check run's Re-run button
+carries), `isReleaseOnly`, `isAutomatic`, `skipAsReleaseOnly`, `HEAD_SHA_UNRESOLVED`; and, re-exported from
+`@review-agent/github` where they live since 0.2.0, `refuseUnbuilt` and `MULTI_REFUSED`. `THOROUGH_REFUSED` is still
+exported but deprecated: nothing refuses `--tier thorough` since 0.2.0.
 
 ### `dispatchReview({ request, installationId, refused?, trigger }) → { runId, idempotencyKey }`
 
@@ -89,7 +90,7 @@ The package root adds the App's identity and registration, which **must not** be
 | `appJwt({ identity, now? })` | the App JWT (RS256, issued by the client id) |
 | `installationToken({ identity, installationId, repositories, permissions?, now?, transport? })` | a token for an installation, scoped to 1–500 named repositories, optionally narrowed in permissions |
 | `normalisePrivateKeyPem(pem)` | repairs a private key whose line breaks were flattened or escaped |
-| `APP_IDENTITY_VARS`, `GITHUB_API_VERSION`, `REVIEW_TOKEN_PERMISSIONS`, `MAX_SCOPED_REPOSITORIES` | constants |
+| `APP_IDENTITY_VARS`, `GITHUB_API_VERSION`, `REVIEW_TOKEN_PERMISSIONS`, `MAX_SCOPED_REPOSITORIES` | constants (`GITHUB_API_VERSION` is `@review-agent/github`'s, re-exported) |
 | `buildManifest(input)`, `APP_PERMISSIONS`, `APP_EVENTS` | the App manifest `init` registers |
 | `convertManifest(…)`, `readConversion(…)`, `ManifestConversionError` | exchange the manifest flow's code for the App, keeping only non-secret fields |
 | `secret(value)`, `REDACTED` | a wrapper whose `toString` and `toJSON` print `[redacted]` |
@@ -98,14 +99,17 @@ The package root adds the App's identity and registration, which **must not** be
 
 | Area | Main exports |
 |---|---|
-| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with |
-| Posting it | `publishReview(…)` — the summary, inline comments, edits to earlier comments and the marker |
+| The review session | `prepareReview(…)` and `runReviewSession(…)` — a whole review, the same whichever way in asked for it; see [the review session](#the-review-session). `SessionResult` (`reviewed` \| `unfinished` \| `failed`), `PreparedReview`, `SessionDeps`, `DEFAULT_SESSION_DEADLINE_MS`; the rules it shares with the App's runner: `mayRetry(record)`, `failureSentence(record)`, `saidSafely(text)`, `postedCommentsOf(published)` |
+| Reporting on the commit | `reporterFor({ octokit, want, identity?, onStarted? })` — `'auto'` \| `'check-run'` \| `'commit-status'` \| `'none'`; `checkRunReporter`, `commitStatusReporter`, `noReporter`; `tokenIdentityOf(octokit)`; `statusFor(…)`, `MAX_STATUS_DESCRIPTION_CHARS` |
+| Clients and gates | `octokitFor({ token, baseUrl?, fetch? })` — a client with the API version pinned, `baseUrl` for GitHub Enterprise Server; `GITHUB_API_VERSION`; `pushAccessOf({ octokit, owner, repo, username })`; `refuseUnbuilt(request)`, `MULTI_REFUSED` |
+| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with. `defaultRunReviewDeps({ note, workDir?, skillCacheDir? })` — its real collaborators, as the CLI and the App's runner wire them |
+| Posting it | `publishReview({ …, via, selfLogin?, ignoreRepliesFrom? })` — the summary, inline comments, edits to earlier comments and the marker. `via` is how the review ran, which the first line of every body says |
 | Reading GitHub | `fetchPullRequest`, `downloadArchive` (with `sanitiseCheckout`, `isCredentialPath` and `pathCollisions`; it also returns the entries it could not write), `fetchRepoConfig` / `parseRepoConfig` / `REPO_CONFIG_PATH`, `fetchThreadReplies` |
 | Deciding what to say | `anchorFindings`, `selectForPosting` |
 | The check run | `createCheckRun`, `completeCheckRun`, `closeCheckRunIfInProgress`, `closeStaleCheckRuns`, `conclusionFor`, `checkRunOutput`, `annotationsFor`, `RERUN_ACTION` |
 | The marker | `encodeMarker`, `decodeMarker`, `findSummaryComment`, `upsertSummaryComment`, `recheckQuestions`, `nextMarkerState`, `applyOutcomes` |
 | Findings and replies | `findingId(finding)` — a 12-hex-character address for one finding in one run (a hash of file, category and title); `declaredOutcome(body)` — `'disputed'`, `'deferred'` or `null` for a reply |
-| Comment bodies | `summaryBody`, `inlineBody`, `reviewBody`, `retractionNote`, `reinstatementNote` |
+| Comment bodies | `summaryBody`, `inlineBody`, `reviewBody`, `retractionNote`, `reinstatementNote`, `automatedReviewLine`, `ReviewVia`, `PRODUCT_URL` |
 | Writing | `postReview`, `retractInlineComment`, `reinstateInlineComment` |
 
 ## `@review-agent/core`
@@ -145,6 +149,52 @@ A `SecretValue` prints `[redacted]` through `String()`, `JSON.stringify` and `co
 to read it. `passEnv` refuses any `ANTHROPIC_*` name, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`, any
 `REVIEW_AGENT_*` name, `GITHUB_TOKEN`, `GH_TOKEN` and `TRIGGER_SECRET_KEY`. `ANTHROPIC_BASE_URL` set in this process
 refuses every review, credential or not.
+
+### The review session
+
+`prepareReview` reads the pull request and the repository's settings file and resolves the settings; nothing is
+spent. `runReviewSession` does the rest — opens the report, reads the previous review's marker, runs the review under
+its deadline, publishes it, finishes the report, and deletes the checkout:
+
+```ts
+import {
+  defaultRunReviewDeps, octokitFor, prepareReview, reporterFor, runReviewSession, tokenIdentityOf,
+} from '@review-agent/github'
+import { defaultDeploymentConfig } from '@review-agent/core'
+
+const octokit = octokitFor({ token: process.env.GITHUB_TOKEN! })
+const prepared = await prepareReview({
+  octokit, owner: 'acme', repo: 'widgets', number: 16, deployment: defaultDeploymentConfig(), ask: {},
+})
+if (prepared.kind === 'failed') throw new Error(prepared.reason)
+
+const identity = await tokenIdentityOf(octokit)          // one GET /user
+const result = await runReviewSession({
+  prepared,
+  post: true,                                            // false: review and return, write nothing
+  reporter: await reporterFor({ octokit, want: 'auto', identity }),
+  via: { kind: 'sdk' },
+  ...(identity.kind === 'user' && { selfLogin: identity.login }),
+  deps: { runReviewDeps: defaultRunReviewDeps({ note: (s) => console.error(s) }) },
+})
+```
+
+Every outcome is returned, never thrown: `reviewed`, `unfinished` (the model ran and produced nothing usable) or
+`failed`, with the `stage` it stopped at (`before-model`, `model`, `withheld`, `publish`), what is known to have been
+spent, and `retryable` — whether running it again could not pay for the model twice. Only a programmer's error throws.
+
+- **Reporting.** `'auto'` reports with a check run when the token can create one (an App's installation token, or
+  Actions' `GITHUB_TOKEN`) and a commit status when it cannot (a person's token), decided with one `GET /user` and
+  never from the environment: a user token gets its user, an installation token is refused with 403 (**UNVERIFIED**
+  against GitHub so far). If the check run is refused anyway, it falls back to a status.
+  A commit status is a **soft gate**: a branch rule cannot pin it to this reviewer, so anyone with push access can set
+  one with the same name. A review that did not run reports `success` with a description saying it is not a verdict
+  (statuses have no `neutral`); a review its runner stopped reports `error`.
+- **`check-only` without a check run** puts the findings in the summary comment, since nothing else could carry them.
+- **Replies.** Only `ignoreRepliesFrom` — an App's own bot login — is ignored when reading `/dispute` and `/defer`, so a
+  person who posted the review can answer it. `selfLogin` makes the session prefer the summary comment that login
+  posted; when GitHub refuses the edit of another's, it posts its own.
+- **The checkout** is deleted when the session ends, unless `keepCheckout` is set.
 
 ## Versioning
 

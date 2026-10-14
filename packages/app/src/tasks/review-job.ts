@@ -1,17 +1,15 @@
-import { mkdtemp } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { Octokit } from '@octokit/core'
 import {
-  defaultDeploymentConfig, materialiseSkills, runCheckPass, runEngine, runRecheckPass,
+  defaultDeploymentConfig,
   type DeploymentConfig, type ReviewRequest,
 } from '@review-agent/core'
 import {
-  closeCheckRunIfInProgress, completeCheckRun, createCheckRun, downloadArchive, fetchPullRequest, fetchRepoConfig,
-  findSummaryComment, publishReview, runReview, type RunReviewDeps,
+  closeCheckRunIfInProgress, completeCheckRun, createCheckRun, defaultRunReviewDeps, fetchPullRequest,
+  fetchRepoConfig, findSummaryComment, octokitFor, publishReview, pushAccessOf, runReview,
+  type RunReviewDeps,
 } from '@review-agent/github'
-import { z } from 'zod'
-import { GITHUB_API_VERSION, installationToken, type AppIdentity } from '../credentials'
+import { installationToken, type AppIdentity } from '../credentials'
 import type { TriggerPort } from '../dispatch'
 import { sendRecordCallback, type RecordCallback } from './record-callback'
 import {
@@ -81,62 +79,23 @@ export const runnerRecordCallback = (env: Record<string, string | undefined> = p
   return { url: url.trim(), secretEnv: secretEnv !== undefined && secretEnv.trim() !== '' ? secretEnv.trim() : 'REVIEW_AGENT_RECORD_SECRET' }
 }
 
-/** The authenticated client, built once per review because an installation token expires in an
- *  hour. @octokit/core 7.0.8's constructor turns only `userAgent` and `timeZone` into headers
- *  (dist-src/index.js), so the API-version pin is a before-request hook, which every
- *  `octokit.request` passes through. `fetch` is injectable for the test and for nothing else. */
-export const octokitFor = (a: { token: string; fetch?: typeof fetch }): Octokit => {
-  const octokit = new Octokit({
-    auth: a.token,
-    ...(a.fetch !== undefined && { request: { fetch: a.fetch } }),
-  })
-  octokit.hook.before('request', (options) => {
-    options.headers['x-github-api-version'] = GITHUB_API_VERSION
-  })
-  return octokit
-}
+/** The client and the push-access question live in `@review-agent/github` since 0.2.0 (spec 0.2.0
+ *  §3.1), so the CLI and the SDK build the same client and ask the same question. Re-exported here
+ *  under the names the runner's own tasks and tests have always imported. */
+export { octokitFor, pushAccessOf }
 
-/** GitHub's own boolean for decision 3's question, read off the live endpoint at Step 27c:
- *  `user.permissions.push`, true for admin, maintain and write, false for triage, read and none. The
- *  coarse `permission` word (admin | write | read | none) is not read, so there is one field to
- *  agree on — the one a deployment's own permission checks should read too. A response
- *  without it is not an answer that grants anything. */
-const PermissionSchema = z.object({ user: z.object({ permissions: z.object({ push: z.boolean() }) }) })
-
-/** Criss, 2026-09-14 (decision 3): whether a requester may spend this deployment's money. A 404 is
- *  an answer — GitHub does not know them on this repository — so it is `false`. Anything else is not
- *  an answer about the person and is thrown, before the engine, where it costs nothing. */
-export const pushAccessOf = async (a: {
-  octokit: Octokit; owner: string; repo: string; username: string
-}): Promise<boolean> => {
-  let data: unknown
-  try {
-    data = (await a.octokit.request('GET /repos/{owner}/{repo}/collaborators/{username}/permission', {
-      owner: a.owner, repo: a.repo, username: a.username,
-    })).data
-  } catch (e) {
-    if ((e as { status?: unknown }).status === 404) return false
-    throw e
-  }
-  const parsed = PermissionSchema.safeParse(data)
-  if (!parsed.success) return false
-  return parsed.data.user.permissions.push
-}
-
+/** The runner's collaborators for `runReview`: the shared defaults (`defaultRunReviewDeps`), with
+ *  the runner's own skill cache. Checkouts go under the system temp directory, a new directory per
+ *  review, as they always have. */
 export const liveRunReviewDeps = (a: { note: (s: string) => void }): RunReviewDeps => ({
-  fetchPullRequest, fetchRepoConfig, downloadArchive, materialiseSkills, runEngine, runCheckPass,
-  runRecheckPass,
-  // A new directory per review: two reviews can share a warm machine, and a checkout that leaked
-  // into another review's tree would be the reviewed code reviewing itself.
-  makeCheckoutDir: () => mkdtemp(join(tmpdir(), 'review-agent-')),
+  ...defaultRunReviewDeps({ note: a.note }),
   // Per user (spec 0.2.0 §9.3 P13). The temp directory is shared, and one cache directory for every
   // account on the machine let any of them plant an entry under the name this runner would look up;
   // `materialiseSkills` now creates it 0700 and trusts only what this user owns. The uid, not the
-  // name, where there is one: it is what the ownership check compares.
+  // name, where there is one: it is what the ownership check compares. Read per review, not when
+  // the deps are built, so a deployment's environment is what the review that runs under it sees.
   skillCacheDir: () => process.env.REVIEW_AGENT_SKILL_CACHE ??
     join(tmpdir(), `review-agent-skills-${process.getuid?.() ?? userInfo().username}`),
-  now: () => new Date(),
-  note: a.note,
 })
 
 export const liveReviewTaskDeps = (a: {

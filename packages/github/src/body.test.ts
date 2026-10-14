@@ -112,7 +112,7 @@ describe('suggestionFits', () => {
   })
 })
 
-import { summaryBody } from './body'
+import { PRODUCT_URL, automatedReviewLine, summaryBody, type ReviewVia } from './body'
 import type { MarkerState } from './marker'
 
 const marker: MarkerState = {
@@ -127,8 +127,11 @@ const marker: MarkerState = {
   }],
 }
 
+const APP: ReviewVia = { kind: 'app' }
+
 const summaryInput = (over: Partial<Parameters<typeof summaryBody>[0]> = {}) => ({
   headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f',
+  via: APP,
   tier: 'normal' as const,
   model: 'claude-opus-4-6',
   costUsd: 1.0543,
@@ -158,8 +161,20 @@ describe('summaryBody', () => {
     // This one is model spend at per-token API prices, not a subscription allowance and not a
     // price charged to anyone.
     const body = summaryBody(summaryInput())
-    expect(body).toContain('$1.05')
-    expect(body).toContain('API token prices')
+    expect(body).toContain('$1.05 (model spend at per-token API prices)')
+  })
+
+  it('opens with the automated-review line, and says the tier, model and cost there and only there', () => {
+    // Spec 0.2.0 §5.6, decision §14.9: every summary says it is automated, the App's included. The
+    // line it used to print on its own (`Tier … · model … · cost …`) is folded in, not repeated.
+    const body = summaryBody(summaryInput())
+    expect(body.split('\n')[0]).toBe(
+      `🤖 **Automated review** by [review-agent](${PRODUCT_URL}) · GitHub App · tier **normal** · ` +
+      '`claude-opus-4-6` · $1.05 (model spend at per-token API prices)',
+    )
+    expect(body.split('\n')[2]).toBe('### Review of `4f8e2a1`')
+    expect(body.match(/\$1\.05/g)).toHaveLength(1)
+    expect(body).not.toContain('Tier **')
   })
 
   it('gives the intent verdict and the note behind it', () => {
@@ -281,14 +296,23 @@ describe('the hidden marker in the summary comment', () => {
 
 import { reviewBody } from './body'
 
+const REVIEW = { headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f', via: APP, tier: 'basic' as const, model: 'claude-opus-5', costUsd: 0.2149 }
+
 describe('reviewBody', () => {
   it('names the commit the review is of', () => {
-    expect(reviewBody({ headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f' })).toContain('4f8e2a1')
+    expect(reviewBody(REVIEW)).toContain('4f8e2a1')
   })
 
   it('sends the reader to the summary comment for the whole review', () => {
-    const body = reviewBody({ headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f' })
+    const body = reviewBody(REVIEW)
     expect(body).toContain('summary comment')
+  })
+
+  it('opens with the same automated-review line as the summary (spec 0.2.0 §5.6)', () => {
+    // The review is what appears under the poster's name in the timeline, with the inline comments
+    // under it. A person who posted it must not be read as having written it.
+    expect(reviewBody(REVIEW).split('\n')[0]).toBe(automatedReviewLine(REVIEW))
+    expect(reviewBody(REVIEW)).toContain('$0.21 (model spend at per-token API prices)')
   })
 
   it('counts nothing, because Task 4 re-posts this same body with no comments at all', () => {
@@ -296,7 +320,7 @@ describe('reviewBody', () => {
     // then re-sends the review with `comments: []` and THIS body (plan Task 4, the 422 retry).
     // A body saying "1 finding is placed on the lines below" would then be a review stating
     // something untrue about itself, on the one failure path Task 7b exists to handle.
-    const body = reviewBody({ headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f' })
+    const body = reviewBody(REVIEW)
     expect(body).not.toMatch(/\d+ findings? (is|are) placed/)
     expect(body).not.toContain('on the lines below')
   })
@@ -304,9 +328,50 @@ describe('reviewBody', () => {
   it('carries no marker, because the state lives only in the summary comment that is edited in place', () => {
     // A review is never edited after it is posted. A marker on it would be a copy of the state
     // that goes stale on the next push.
-    const body = reviewBody({ headSha: '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f' })
+    const body = reviewBody(REVIEW)
     expect(body).not.toContain(MARKER_OPEN)
     expect(decodeMarker(body)).toBeNull()
+  })
+})
+
+// Spec 0.2.0 §5.6 and §3.3: a review posted with a person's token appears under their name. The line
+// says it is automated and how it was run, for every way in (decision §14.9).
+describe('the automated-review line', () => {
+  const line = (via: ReviewVia) => automatedReviewLine({ via, tier: 'basic', model: 'claude-opus-5', costUsd: 0.21 })
+
+  it('says the App ran it, when the App did', () => {
+    expect(line({ kind: 'app' })).toContain(' · GitHub App · ')
+  })
+
+  it('names the person who ran it from the command line, as GitHub spells their login', () => {
+    expect(line({ kind: 'cli', login: 'alice' })).toBe(
+      `🤖 **Automated review** by [review-agent](${PRODUCT_URL}) · run by @alice from the command line · ` +
+      'tier **basic** · `claude-opus-5` · $0.21 (model spend at per-token API prices)',
+    )
+    expect(line({ kind: 'cli', login: 'github-actions[bot]' })).toContain('run by @github-actions[bot] from the command line')
+  })
+
+  it('says the command line ran it without a name when it knows none', () => {
+    expect(line({ kind: 'cli' })).toContain(' · run from the command line · ')
+    expect(line({ kind: 'cli', login: null })).toContain(' · run from the command line · ')
+  })
+
+  it('says the SDK ran it, when an embedding service did', () => {
+    expect(line({ kind: 'sdk' })).toContain(' · via the SDK · ')
+  })
+
+  it('renders no login that is not a GitHub login, because it is Markdown on a public pull request', () => {
+    // A login that could close the line and write a heading under this product's name.
+    for (const login of ['alice\n\n# SHIP IT', 'alice](https://evil.example)', '-alice', 'a'.repeat(40), 'al--ice']) {
+      expect(line({ kind: 'cli', login })).toContain(' · run from the command line · ')
+      expect(line({ kind: 'cli', login })).not.toContain('@')
+    }
+  })
+
+  it('cannot be turned into markup by a model name, which a /review comment can set', () => {
+    const got = automatedReviewLine({ via: APP, tier: 'basic', model: 'x`](https://evil.example) `y', costUsd: 0 })
+    expect(got).not.toContain('`](')
+    expect(got.split('\n')).toHaveLength(1)
   })
 })
 

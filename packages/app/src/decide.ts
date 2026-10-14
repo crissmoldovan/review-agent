@@ -2,7 +2,12 @@ import { z } from 'zod'
 import type { DeploymentConfig, Effort, ReviewRequest, Tier } from '@review-agent/core'
 // RERUN_IDENTIFIER is imported, never redefined and never re-exported: Task 6 owns the string because
 // Task 6 writes the button, and decide.test.ts imports it from the same place.
-import { MARKER_OPEN, RERUN_IDENTIFIER } from '@review-agent/github'
+import { MARKER_OPEN, MULTI_REFUSED, RERUN_IDENTIFIER, refuseUnbuilt } from '@review-agent/github'
+
+/** Decision 4's refusals and the function every other doorway applies them with live in
+ *  `@review-agent/github` since 0.2.0 (spec 0.2.0 §3.1), so the CLI and the SDK refuse exactly what
+ *  this receiver refuses. Re-exported, so `@review-agent/app/receiver` still offers them. */
+export { MULTI_REFUSED, THOROUGH_REFUSED, refuseUnbuilt } from '@review-agent/github'
 
 export type WebhookDelivery = { event: string; payload: unknown }
 
@@ -41,17 +46,10 @@ const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
  *  the deployment's defaults — but it is NAMED in `refused`, never dropped in silence (Criss,
  *  2026-09-14, decision 4). That is the trap: a value this parser drops never reaches
  *  `resolveSettings`, so it can never land in `droppedRequestKeys`, and this list is the only way
- *  the summary (Task 3) can say so. `--tier thorough` and `--multi` are refused outright until the
- *  fan-out is built (design §3: `thorough` "is not usable until §4.4 is proven"). */
+ *  the summary (Task 3) can say so. `--multi` is refused outright until the multi-reviewer mode is
+ *  built (spec 0.2.0 §8.3). `--tier thorough` was refused with it until 0.2.0, which made it one
+ *  reviewer at `high` effort everywhere (§14.1), and is honoured like the other two tiers. */
 export type CommandFlags = { request: Partial<ReviewRequest>; refused: string[] }
-
-const NOT_BUILT = 'the multi-reviewer fan-out is not built yet'
-
-/** Decision 4's two refusals, phrased once. The parser below, the Re-run branch's `refuseUnbuilt`
- *  and the runner (Task 13) all say exactly these words, so a summary never names the same refusal
- *  two different ways. */
-export const THOROUGH_REFUSED = `\`--tier thorough\` — ${NOT_BUILT}, so this review ran at the deployment’s default tier.`
-export const MULTI_REFUSED = `\`--multi\` — ${NOT_BUILT}, so one reviewer ran.`
 
 export function parseCommandFlags(rest: string): CommandFlags {
   const out: Partial<ReviewRequest> = {}
@@ -70,8 +68,7 @@ export function parseCommandFlags(rest: string): CommandFlags {
     switch (name) {
       case '--tier': {
         const v = value()
-        if (v === 'thorough') refused.push(THOROUGH_REFUSED)
-        else if ((TIERS as readonly string[]).includes(v)) out.tier = v as Tier
+        if ((TIERS as readonly string[]).includes(v)) out.tier = v as Tier
         else notUsed('--tier', v)
         break
       }
@@ -147,22 +144,6 @@ export function decodeRequestRefinement(s: string | null | undefined): Partial<R
     return parsed.success ? parsed.data : null
   } catch {
     return null // a check run this App did not create, or one from an older encoding
-  }
-}
-
-/** Decision 4, for every doorway that is not the comment parser: a Re-run's `external_id`, and a
- *  payload somebody triggered by hand (Task 13 calls this too). `thorough` and `multi` are dropped
- *  and named, and the review runs at the deployment's default tier with one reviewer — the same
- *  outcome the parser gives. Every other setting passes through untouched. */
-export function refuseUnbuilt(r: Partial<ReviewRequest>): { request: Partial<ReviewRequest>; refused: string[] } {
-  const { tier, multi, ...rest } = r
-  const refused = [
-    ...(tier === 'thorough' ? [THOROUGH_REFUSED] : []),
-    ...(multi === true ? [MULTI_REFUSED] : []),
-  ]
-  return {
-    request: { ...rest, ...(tier !== undefined && tier !== 'thorough' && { tier }) },
-    refused,
   }
 }
 
@@ -310,7 +291,7 @@ export function decideDelivery(a: { delivery: WebhookDelivery; deployment: Deplo
     }
     const pr = e.check_run.pull_requests?.[0]?.number
     if (pr === undefined) return ignore('the re-run button was pressed on a check run with no pull request')
-    // Decision 4: a Re-run repeats the settings it carried, except the two that are not built.
+    // Decision 4: a Re-run repeats the settings it carried, except the one that is not built.
     const carried = refuseUnbuilt(decodeRequestRefinement(e.check_run.external_id) ?? {})
     return {
       kind: 'review',

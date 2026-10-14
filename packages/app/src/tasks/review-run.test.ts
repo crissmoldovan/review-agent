@@ -17,7 +17,7 @@ import {
 } from '@review-agent/github'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppIdentity } from '../credentials'
-import { HEAD_SHA_UNRESOLVED, MULTI_REFUSED, THOROUGH_REFUSED, decodeRequestRefinement } from '../decide'
+import { HEAD_SHA_UNRESOLVED, MULTI_REFUSED, decodeRequestRefinement } from '../decide'
 import {
   REVIEW_TASK_ID, idempotencyKeyFor, tagsFor, type ReviewTaskPayload, type TriggerPort,
 } from '../dispatch'
@@ -139,6 +139,7 @@ const publishedFor = (r: RunReviewResult, over: Partial<PublishedReview> = {}): 
     completed: r.result.failure === null && r.result.output !== null,
     reviewId: 77,
     summaryCommentId: 903,
+    summaryUrl: null,
     said: {
       inline: findings.map((f) => ({ finding: f, line: f.line, side: 'RIGHT' as const })),
       summaryOnly: [],
@@ -202,7 +203,7 @@ const deps = (over: Partial<ReviewTaskDeps> = {}): Harness => {
     runReview: vi.fn(async () => REVIEWED),
     runReviewDeps: runReviewDepsWith(),
     publishReview: vi.fn(async (a: { review: RunReviewResult }) => publishedFor(a.review)),
-    createCheckRun: vi.fn(async () => ({ id: 4242 })),
+    createCheckRun: vi.fn(async () => ({ id: 4242, url: null })),
     closeCheckRunIfInProgress: vi.fn(async (_a: Parameters<ReviewTaskDeps['closeCheckRunIfInProgress']>[0]) => true),
     checkRunMemory: null,
     // The real conclusionFor, so a test that asks what the check run concluded gets Task 6's
@@ -509,22 +510,36 @@ describe('who may spend the money on a review (Criss, decision 3)', () => {
 
 describe('what the summary is told (Criss, decision 4)', () => {
   it('hands publishReview the refusals the comment doorway carried, so the summary names them', async () => {
-    const refused = ['`--tier thorough` — the multi-reviewer fan-out is not built yet, so this review ran at the deployment’s default tier.']
+    const refused = [MULTI_REFUSED]
     const d = deps()
     await reviewTaskRun({ ...PAYLOAD, refused }, {}, d)
     expect(vi.mocked(d.publishReview).mock.calls[0][0]).toMatchObject({ refused })
   })
 
-  it('refuses a thorough tier and the fan-out a payload carries itself, reviews at the default, and names both', async () => {
+  it('refuses the fan-out a payload carries itself, reviews with one reviewer, and names it', async () => {
     // A Re-run is refused in decideDelivery (Task 10), but a payload can be triggered by hand, as
-    // Task 15 Step 16 does. Without this, `thorough` is an $8 target and a $20 ceiling at per-token
-    // API prices for a fan-out that does not exist.
+    // Task 15 Step 16 does. `--multi` stays refused until the multi-reviewer mode is built.
     const d = deps()
     await reviewTaskRun({ ...PAYLOAD, request: { ...REQUEST, tier: 'thorough', multi: true } }, {}, d)
     const ask = vi.mocked(d.runReview).mock.calls[0][0].ask
-    expect(ask.tier).toBeUndefined()
     expect(ask.multi).toBeUndefined()
-    expect(vi.mocked(d.publishReview).mock.calls[0][0].refused).toEqual([THOROUGH_REFUSED, MULTI_REFUSED])
+    expect(vi.mocked(d.publishReview).mock.calls[0][0].refused).toEqual([MULTI_REFUSED])
+  })
+
+  it('honours a thorough tier a payload carries, because it is one reviewer at high effort (spec 0.2.0 §14.1)', async () => {
+    // It used to be stripped with `multi`, when `thorough` was going to mean the fan-out. Now it buys
+    // what it says, so it reaches runReview and nothing in the summary calls it refused.
+    const d = deps()
+    await reviewTaskRun({ ...PAYLOAD, request: { ...REQUEST, tier: 'thorough' } }, {}, d)
+    expect(vi.mocked(d.runReview).mock.calls[0][0].ask.tier).toBe('thorough')
+    expect(vi.mocked(d.publishReview).mock.calls[0][0].refused).toBeUndefined()
+    expect(decodeRequestRefinement(vi.mocked(d.createCheckRun).mock.calls[0][0].externalId)).toEqual({ tier: 'thorough' })
+  })
+
+  it('says on every summary and review that the App ran it (spec 0.2.0 §5.6, decision §14.9)', async () => {
+    const d = deps()
+    await reviewTaskRun(PAYLOAD, {}, d)
+    expect(vi.mocked(d.publishReview).mock.calls[0][0].via).toEqual({ kind: 'app' })
   })
 })
 
@@ -1539,7 +1554,7 @@ describe('a retried attempt closes the check run of the attempt it replaces', ()
     const d = deps({
       checkRunMemory: m.port,
       closeCheckRunIfInProgress: vi.fn(async () => { order.push('close'); return true }),
-      createCheckRun: vi.fn(async () => { order.push('create'); return { id: 4242 } }),
+      createCheckRun: vi.fn(async () => { order.push('create'); return { id: 4242, url: null } }),
     })
     reviewedOf(await reviewTaskRun(PAYLOAD, { attempt: 2 }, d))
     expect(order).toEqual(['close', 'create'])

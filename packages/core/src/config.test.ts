@@ -39,7 +39,8 @@ describe('defaultDeploymentConfig', () => {
     const c = defaultDeploymentConfig()
     expect(c.tiers.basic).toEqual({ agents: 1, effort: 'low', check: true, budgetUsd: 2 })
     expect(c.tiers.normal).toEqual({ agents: 1, effort: 'medium', check: true, budgetUsd: 3 })
-    expect(c.tiers.thorough).toEqual({ agents: 3, effort: 'high', check: true, budgetUsd: 8 })
+    // One reviewer at high effort (spec 0.2.0 §14.1): breadth is the separate multi-reviewer mode.
+    expect(c.tiers.thorough).toEqual({ agents: 1, effort: 'high', check: true, budgetUsd: 8 })
   })
 
   it('hands out a fresh object each call', () => {
@@ -110,8 +111,16 @@ describe('resolveSettings precedence', () => {
     const s = resolve(null, { tier: 'thorough' })
     expect(s.effort).toBe('high')
     expect(s.check).toBe(true)
-    expect(s.multi).toBe(true)
+    // `thorough` is one reviewer (spec 0.2.0 §14.1), so the record says so: it used to say `multi:
+    // true` for a review one reviewer wrote.
+    expect(s.multi).toBe(false)
     expect(s.budget.targetUsd).toBe(8)
+  })
+
+  it('still reads multi off a tier a deployment gave more than one reviewer', () => {
+    const deployment = defaultDeploymentConfig()
+    deployment.tiers.normal = { ...deployment.tiers.normal, agents: 3 }
+    expect(resolveSettings({ deployment, repo: null, request: request({ tier: 'normal' }) }).multi).toBe(true)
   })
 
   it('lets the request override the tier preset', () => {

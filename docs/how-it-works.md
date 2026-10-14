@@ -26,7 +26,8 @@ the App adds the parts that post.
 12. **Scan for secrets.** If anything in the output matches a secret pattern, the review is withheld rather than
     posted.
 13. **Post** (App) or **print** (CLI): the summary comment, the inline comments, edits to earlier comments, and the
-    check run's conclusion.
+    check run's conclusion. The summary and the review each open with a line saying they are automated, how the
+    review was run, the tier, the model and the cost.
 14. **Send the record** to the deployment's callback, if it set one.
 15. **Delete the checkout.** The downloaded code is removed once the review has been published (or printed), and at
     once if the review fails — no copy of a reviewed repository is kept.

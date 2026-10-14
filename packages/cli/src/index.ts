@@ -1,13 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { Octokit } from '@octokit/core'
 import { convertManifest } from '@review-agent/app'
-import {
-  defaultSkillCacheDir, materialiseSkills, runCheckPass, runEngine, runRecheckPass,
-} from '@review-agent/core'
-import { downloadArchive, fetchPullRequest, fetchRepoConfig } from '@review-agent/github'
+import { defaultSkillCacheDir } from '@review-agent/core'
+import { defaultRunReviewDeps, octokitFor } from '@review-agent/github'
 import { Command } from 'commander'
 import { EXIT_BAD_USAGE, EXIT_OK } from './exit-codes'
 import { runInitCommand } from './init-command'
@@ -49,15 +44,20 @@ program
       stderr: (s) => { process.stderr.write(s + '\n') },
     })
     try {
+      // The collaborators every way in shares (spec 0.2.0 §3.1): GitHub, the archive, the engine and
+      // its passes, a new checkout per review under the system temp directory. `note` is the
+      // command's own stderr, so it is taken off here and the command passes it back in.
+      // `runRecheckPass` is among them, and never reached: `runReviewCommand` reads no marker, so it
+      // passes no previous findings and `runReview` buys no third pass.
+      const { note: _note, ...pipeline } = defaultRunReviewDeps({ note: () => undefined })
       process.exitCode = await runReviewCommand(flags, {
-        fetchPullRequest, fetchRepoConfig, downloadArchive, materialiseSkills, runEngine, runCheckPass,
-        // Wired, and never reached: `runReviewCommand` reads no marker, so it passes no previous
-        // findings and `runReview` buys no third pass. The CLI's bill is unchanged by this feature.
-        runRecheckPass,
-        makeOctokit: (auth) => new Octokit({ auth }),
-        makeCheckoutDir: () => mkdtemp(join(tmpdir(), 'review-agent-')),
+        ...pipeline,
+        // The same client the App's runner builds, with the API version pinned, so the CLI reads the
+        // API the rest of this product was proven against.
+        makeOctokit: (token) => octokitFor({ token }),
         // This OS's own cache directory unless the user names one (spec 0.2.0 §9.3 P13). Empty counts as
-        // unset, as it does for REVIEW_AGENT_CLAUDE_BIN.
+        // unset, as it does for REVIEW_AGENT_CLAUDE_BIN. Read per review, as before, and not checked
+        // here: a relative one is refused by `materialiseSkills`, and only when a skill needs it.
         skillCacheDir: () => {
           const named = process.env.REVIEW_AGENT_SKILL_CACHE ?? ''
           return named !== '' ? named : defaultSkillCacheDir()
@@ -65,7 +65,6 @@ program
         stdout: (s) => { process.stdout.write(s) },
         stderr: (s) => { process.stderr.write(s + '\n') },
         env: process.env,
-        now: () => new Date(),
       }, { signal: interrupt.signal })
     } finally {
       interrupt.dispose()

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defaultDeploymentConfig } from '@review-agent/core'
+import * as github from '@review-agent/github'
 import { describe, expect, it } from 'vitest'
 import { GITHUB_API_VERSION } from '../credentials'
 import { sendRecordCallback } from './record-callback'
@@ -81,42 +82,24 @@ describe('the collaborators the deployed task actually uses', () => {
     expect(live.sendRecord).toBe(sendRecordCallback)
   })
 
-  it('reads push access from GitHub’s own push boolean, and nothing weaker than write counts', async () => {
-    // Criss, 2026-09-14 (decision 3). The shape was proven by hand at Step 27c.
-    const answering = (body: unknown) => octokitFor({
-      token: 'ghs_installation_FAKE',
-      fetch: async () => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }),
+  it('builds its client and asks about push access with the github package’s own, not a copy', () => {
+    // Moved to @review-agent/github in 0.2.0 (spec 0.2.0 §3.1), where their cases now live
+    // (octokit.test.ts). The runner must use those, so the CLI, the SDK and the App cannot drift.
+    expect(octokitFor).toBe(github.octokitFor)
+    expect(pushAccessOf).toBe(github.pushAccessOf)
+    const live = liveReviewTaskDeps({
+      identity: () => { throw new Error('not read by this test') },
+      log: () => undefined, metric: () => undefined, startAnotherRun: null, checkRunMemory: null,
     })
-    const ask = (octokit: ReturnType<typeof octokitFor>) =>
-      pushAccessOf({ octokit, owner: 'crissmoldovan', repo: 'review-agent-proving-ground', username: 'crissmoldovan' })
-    const reply = (push: boolean, permission: string, role_name: string) => ({
-      permission, role_name,
-      user: { login: 'crissmoldovan', permissions: { admin: role_name === 'admin', maintain: false, push, triage: true, pull: true } },
-    })
-    expect(await ask(answering(reply(true, 'admin', 'admin')))).toBe(true)
-    expect(await ask(answering(reply(true, 'write', 'maintain')))).toBe(true)
-    expect(await ask(answering(reply(true, 'write', 'write')))).toBe(true)
-    expect(await ask(answering(reply(false, 'read', 'triage')))).toBe(false)
-    expect(await ask(answering(reply(false, 'read', 'read')))).toBe(false)
-    expect(await ask(answering(reply(false, 'none', 'none')))).toBe(false)
-    // One field decides, so there is one field for a deployment's own checks to agree on: a coarse
-    // `permission` word is not consulted, and a response without the boolean is a refusal.
-    expect(await ask(answering({ permission: 'write', role_name: 'write', user: { permissions: { push: false } } }))).toBe(false)
-    expect(await ask(answering({ permission: 'admin', role_name: 'admin' }))).toBe(false)
-    expect(await ask(answering({ unexpected: true }))).toBe(false)
+    expect(live.hasPushAccess).toBe(github.pushAccessOf)
   })
 
-  it('treats somebody GitHub does not know on the repository as having no push access, and lets any other error out', async () => {
-    const failing = (status: number) => octokitFor({
-      token: 'ghs_installation_FAKE',
-      fetch: async () => new Response(JSON.stringify({ message: 'x' }), { status, headers: { 'content-type': 'application/json' } }),
-    })
-    const ask = (octokit: ReturnType<typeof octokitFor>) =>
-      pushAccessOf({ octokit, owner: 'crissmoldovan', repo: 'review-agent-proving-ground', username: 'not-a-collaborator' })
-    expect(await ask(failing(404))).toBe(false)
-    // A 403 or a 5xx is not an answer about the person. It is thrown, before the engine, where it
-    // costs $0 and trigger.dev may retry it (Step 35's classification).
-    await expect(ask(failing(403))).rejects.toMatchObject({ status: 403 })
+  it('reviews with the real collaborators every way in shares (defaultRunReviewDeps)', () => {
+    const d = liveRunReviewDeps({ note: () => undefined })
+    const shared = github.defaultRunReviewDeps({ note: () => undefined })
+    for (const k of ['fetchPullRequest', 'fetchRepoConfig', 'downloadArchive', 'materialiseSkills', 'runEngine', 'runCheckPass', 'runRecheckPass'] as const) {
+      expect(d[k]).toBe(shared[k])
+    }
   })
 
   it('never starts a hosted run from a review run in process', () => {
