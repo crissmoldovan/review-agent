@@ -1,5 +1,5 @@
 import { mkdir, readdir, unlink } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
@@ -73,7 +73,9 @@ export async function sanitiseCheckout(dir: string): Promise<SanitisedCheckout> 
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))   // a stable, reviewable order
     for (const entry of entries) {
       const full = join(current, entry.name)
-      const rel = relative(dir, full)
+      // Repository paths, as GitHub writes them: `/` on every OS, so the record and the summary say
+      // `apps/web/.env.local` on Windows too.
+      const rel = relative(dir, full).split(sep).join('/')
       if (entry.isDirectory()) {
         if (entry.name === '.git') { gitDirs.push(rel); continue }   // do not descend
         await walk(full)

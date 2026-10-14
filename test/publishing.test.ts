@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, type ExecFileSyncOptions } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SHIP_SOURCEMAPS as APP_SOURCEMAPS } from '../packages/app/sourcemaps'
 import { SHIP_SOURCEMAPS as CLI_SOURCEMAPS } from '../packages/cli/sourcemaps'
@@ -54,15 +54,31 @@ type Packed = { dir: string; name: string; version: string; paths: string[]; man
 /** `pnpm pack --json` prints the tarball's absolute path and its contents. The manifest is read out
  *  of the tarball rather than off disk, because the interesting differences — publishConfig
  *  applied, workspace: ranges resolved — exist only in the packed copy. */
+/** pnpm, started without a shell. On Windows `pnpm` on PATH is a `.cmd` shim, which `execFile` cannot
+ *  start; under `pnpm test` pnpm names its own entry point in `npm_execpath` — a JavaScript file this
+ *  Node can run, or the pnpm executable itself. */
+const pnpm = (args: string[], opts: ExecFileSyncOptions): string => {
+  const entry = process.env.npm_execpath
+  const out = entry === undefined || entry === ''
+    ? execFileSync('pnpm', args, opts)
+    : /\.(c|m)?js$/i.test(entry)
+      ? execFileSync(process.execPath, [entry, ...args], opts)
+      : execFileSync(entry, args, opts)
+  return String(out)
+}
+
+/** One file out of a tarball. `tar` is given the file's NAME and run in its directory: GNU tar reads
+ *  `C:\…` as a remote host, and Windows has more than one `tar` on PATH. */
+const fromTarball = (tarball: string, path: string): string =>
+  execFileSync('tar', ['-xOzf', basename(tarball), `package/${path}`], { cwd: dirname(tarball), encoding: 'utf8' })
+
 const packOne = (dir: string, destination: string): Packed => {
-  const output = execFileSync('pnpm', ['pack', '--pack-destination', destination, '--json'], {
+  const output = pnpm(['pack', '--pack-destination', destination, '--json'], {
     cwd: join(REPO, 'packages', dir),
     encoding: 'utf8',
   })
   const result = JSON.parse(output) as { name: string; version: string; filename: string; files: { path: string }[] }
-  const manifest = JSON.parse(
-    execFileSync('tar', ['-xOzf', result.filename, 'package/package.json'], { encoding: 'utf8' }),
-  ) as Manifest
+  const manifest = JSON.parse(fromTarball(result.filename, 'package.json')) as Manifest
   return {
     dir,
     name: result.name,
@@ -177,7 +193,7 @@ describe('what a published tarball carries', () => {
     // What ships is what the build makes NOW. Packing against a stale dist would let this suite
     // pass on files nobody has built since the last change. No `prepack` script does this for us
     // on purpose: pnpm runs those with their output on stdout, which would break `--json` above.
-    execFileSync('pnpm', ['-r', 'build'], { cwd: REPO, stdio: 'pipe' })
+    pnpm(['-r', 'build'], { cwd: REPO, stdio: 'pipe' })
     destination = mkdtempSync(join(tmpdir(), 'review-agent-pack-'))
     packed = PUBLISHED.map((p) => packOne(p.dir, destination))
   }, 300_000)
@@ -219,7 +235,7 @@ describe('what a published tarball carries', () => {
     const seen = new Map<string, boolean>()
     for (const p of packed) {
       for (const path of p.paths.filter((f) => f.startsWith('dist/') || f === 'README.md')) {
-        const source = execFileSync('tar', ['-xOzf', p.tarball, `package/${path}`], { encoding: 'utf8' })
+        const source = fromTarball(p.tarball, path)
         expect(namesIn(source, names, seen), `${p.name} ${path} names a never-shipped name at`).toEqual([])
         for (const needle of NEVER_SHIPPED_STRINGS) {
           expect(source, `${p.name} ${path} carries ${needle}`).not.toContain(needle)
@@ -289,7 +305,7 @@ describe('what a published tarball carries', () => {
     for (const p of packed) {
       const declared = Object.keys(p.manifest.dependencies ?? {})
       for (const path of p.paths.filter((f) => f.endsWith('.js') || f.endsWith('.mjs'))) {
-        const source = execFileSync('tar', ['-xOzf', p.tarball, `package/${path}`], { encoding: 'utf8' })
+        const source = fromTarball(p.tarball, path)
         for (const specifier of bareImports(source)) {
           expect(declared, `${p.name} ${path} imports ${specifier}`).toContain(packageOf(specifier))
         }
