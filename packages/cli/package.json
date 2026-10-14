@@ -1,0 +1,32 @@
+{
+  "name": "@review-agent/cli",
+  "version": "0.1.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crissmoldovan/review-agent.git",
+    "directory": "packages/cli"
+  },
+  "files": ["dist"],
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "bin": { "review-agent": "./dist/index.js" },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "exports": { ".": { "import": "./dist/index.js" } }
+  },
+  "scripts": { "build": "tsup", "typecheck": "tsc -p tsconfig.json --noEmit" },
+  "dependencies": {
+    "@review-agent/app": "workspace:*",
+    "@review-agent/core": "workspace:*",
+    "@review-agent/github": "workspace:*",
+    "@octokit/core": "^7.0.8",
+    "@trigger.dev/sdk": "4.5.16",
+    "commander": "^15.0.0",
+    "tar": "^7.4.3",
+    "zod": "^4.6.3"
+  }
+}

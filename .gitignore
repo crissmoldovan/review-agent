@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.env
+.env.*
+coverage/
+*.tsbuildinfo
+# Where `trigger.dev deploy` writes the bundle and the generated Containerfile. Ignored for a
+# stronger reason than noise: on a REAL deploy the build manifest's `deploy.env` is seeded from the
+# project's server-side environment variables as VALUES, not names, so a committed build directory
+# would commit Production's credentials. (On `--dry-run` it was observed empty — 2026-09-14,
+# docs/spikes/claude-in-image.md — but that is the CLI's choice, not a guarantee to rely on.)
+.trigger/
+
+# packages/app/src/boundary.test.ts plants this module in `src` for one case and removes it again.
+# Ignored so a run killed mid-case cannot leave a committable file behind.
+packages/app/src/planted-by-boundary-test.ts
+
+# packages/cli/src/init-boundary.test.ts does the same, for the rule that keeps the registration
+# secrets off every surface.
+packages/cli/src/planted-by-init-boundary-test.ts

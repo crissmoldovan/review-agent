@@ -1,0 +1,11 @@
+// Deliberately not a `.ts` file: `init-boundary.test.ts` copies it INTO `packages/cli/src` for one
+// case and deletes it again. It is the shape the rule has to find unaided — a module nothing in the
+// init half imports yet, holding the conversion's output and putting it on disk, added by an author
+// who will wire it up in the next commit. Enrolment is by what a module NAMES, so this one is
+// enrolled the moment it exists, and the rule then condemns it.
+import { writeFileSync } from 'node:fs'
+import type { ConvertedApp } from '@review-agent/app'
+
+export const keepACopy = (app: ConvertedApp, path: string): void => {
+  writeFileSync(path, app.pem.reveal())
+}

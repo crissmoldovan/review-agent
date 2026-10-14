@@ -1,0 +1,23 @@
+{
+  "name": "@review-agent/core",
+  "version": "0.1.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crissmoldovan/review-agent.git",
+    "directory": "packages/core"
+  },
+  "files": ["dist"],
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }
+  },
+  "scripts": { "build": "tsup", "typecheck": "tsc -p tsconfig.json --noEmit" },
+  "dependencies": { "tar": "^7.4.3", "zod": "^4.6.3" }
+}

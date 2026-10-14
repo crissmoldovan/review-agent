@@ -1,0 +1,39 @@
+{
+  "_note": "A placeholder in the shape real-pr.e2e.test.ts writes, not a measurement. The paid case (REVIEW_AGENT_E2E_PAID=1) overwrites this file with the run it made.",
+  "recordedAt": null,
+  "target": {
+    "repo": "acme/widgets",
+    "pr": 1,
+    "headSha": "0000000000000000000000000000000000000000"
+  },
+  "tier": "basic",
+  "model": "claude-opus-5",
+  "effort": "low",
+  "engineVersion": "0.0.0",
+  "instructionsVersion": "0.0.0",
+  "skills": [],
+  "budgetUsd": {
+    "targetUsd": 2,
+    "wrapUpAtUsd": 1.4,
+    "ceilingUsd": 5
+  },
+  "costUsd": 0,
+  "usage": {
+    "costUsd": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "turns": 0,
+    "durationMs": 0
+  },
+  "wrapUpFired": false,
+  "cutShort": false,
+  "failure": null,
+  "exitCode": 0,
+  "findings": 0,
+  "inconclusive": 0,
+  "intent": null,
+  "removedCredentialFiles": [],
+  "wallClockSeconds": 0
+}

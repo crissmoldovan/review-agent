@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+# pnpm 11 requires an explicit decision on every dependency postinstall script. esbuild's is how it
+# places its own platform binary; vite (vitest) and tsup both need it, so the toolchain cannot run
+# without it. Nothing else in the workspace is allowed to run a build script.
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - zod@4.6.3

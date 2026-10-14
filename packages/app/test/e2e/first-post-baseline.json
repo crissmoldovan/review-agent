@@ -1,0 +1,57 @@
+{
+  "_note": "A placeholder in the shape first-post.e2e.test.ts writes, not a measurement. The paid case (REVIEW_AGENT_E2E_PAID=1) overwrites `first` with the run it made, and the hosted read-back adds one entry per run id under `hostedRuns`. Every id below is zero.",
+  "recordedAt": null,
+  "target": {
+    "repo": "crissmoldovan/review-agent-proving-ground",
+    "pr": 1,
+    "headSha": "0000000000000000000000000000000000000000"
+  },
+  "checkRunName": "review-agent",
+  "first": {
+    "reviewedHeadSha": "0000000000000000000000000000000000000000",
+    "reviewId": 0,
+    "summaryCommentId": 0,
+    "summaryComments": 0,
+    "inlineComments": 0,
+    "suggestionCommentIds": [],
+    "counts": {
+      "inline": 0,
+      "summaryOnly": 0,
+      "droppedInline": 0,
+      "suppressed": 0,
+      "notInCheckout": 0
+    },
+    "checkRun": {
+      "id": 0,
+      "conclusion": null,
+      "onGitHub": {
+        "name": "review-agent",
+        "status": null,
+        "conclusion": null
+      }
+    },
+    "tier": "basic",
+    "model": "claude-opus-5",
+    "effort": "low",
+    "budget": {
+      "targetUsd": 1.6,
+      "wrapUpAtUsd": 1.12,
+      "ceilingUsd": 4
+    },
+    "costUsd": 0,
+    "usage": {
+      "costUsd": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "turns": 0,
+      "durationMs": 0
+    },
+    "findings": 0,
+    "intent": null,
+    "failure": null,
+    "wallClockSeconds": 0,
+    "markerRuns": 0
+  }
+}

@@ -1,0 +1,9 @@
+// Deliberately not a `.ts` file: `boundary.test.ts` copies it INTO `packages/app/src` for one case
+// and deletes it again, and `./credentials` only resolves from there. It is the shape that walked
+// past the old hand-written list of receiver modules — a new internet-facing module that mints a
+// credential, which nobody remembered to add to the list — so the rule has to find it unaided.
+import { installationToken } from './credentials'
+
+/** A receiver that mints its own installation token: the boundary the import-graph rule exists to
+ *  hold, broken in the one way a list of filenames could not see. */
+export const mintForDelivery = installationToken
