@@ -9,6 +9,13 @@ import type { Finding } from './findings'
 import { fixturePath } from '../test/fixture'
 import { inputFixture as baseInputFixture, settingsFixture } from '../test/helpers/engine-input'
 
+/** The system prompt as the fake Claude received it: on the command line, or — on Windows, or past the
+ *  length threshold — in the file `--append-system-prompt-file` named (spec 0.2.0 §9.3 P3). */
+const systemPromptOf = (seen: { argv: string[]; systemPromptFile?: { text: string } | null }): string =>
+  seen.argv.includes('--append-system-prompt')
+    ? seen.argv[seen.argv.indexOf('--append-system-prompt') + 1]
+    : seen.systemPromptFile?.text ?? ''
+
 const fakeCli = fileURLToPath(new URL('../test/fake-claude.mjs', import.meta.url))
 let record: string
 let checkout: string
@@ -59,7 +66,7 @@ describe('runCheckPass', () => {
     expect(seen.stdin).toContain('FIRST')
     expect(seen.stdin).toContain('SECOND')
     expect(seen.stdin).toContain('index = position in this list, from 0')
-    const sys = seen.argv[seen.argv.indexOf('--append-system-prompt') + 1]
+    const sys = systemPromptOf(seen)
     expect(sys).toContain('try to disprove each finding')
     // Same lock-down as the review itself: this pass also reads PR-authored code.
     expect(seen.argv).toContain('--restricted')

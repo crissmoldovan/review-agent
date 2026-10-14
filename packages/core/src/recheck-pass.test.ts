@@ -8,6 +8,13 @@ import { MAX_RECHECK_FIELD_CHARS, MAX_RECHECK_ROWS, runRecheckPass, type Previou
 import { fixturePath } from '../test/fixture'
 import { inputFixture as baseInputFixture, settingsFixture } from '../test/helpers/engine-input'
 
+/** The system prompt as the fake Claude received it: on the command line, or — on Windows, or past the
+ *  length threshold — in the file `--append-system-prompt-file` named (spec 0.2.0 §9.3 P3). */
+const systemPromptOf = (seen: { argv: string[]; systemPromptFile?: { text: string } | null }): string =>
+  seen.argv.includes('--append-system-prompt')
+    ? seen.argv[seen.argv.indexOf('--append-system-prompt') + 1]
+    : seen.systemPromptFile?.text ?? ''
+
 const fakeCli = fileURLToPath(new URL('../test/fake-claude.mjs', import.meta.url))
 let record: string
 let checkout: string
@@ -83,7 +90,7 @@ describe('runRecheckPass', () => {
     // request: a row cannot close the fence, because JSON.stringify escapes every character that
     // could.
     expect(seen.stdin).toContain('```json')
-    const sys = seen.argv[seen.argv.indexOf('--append-system-prompt') + 1]
+    const sys = systemPromptOf(seen)
     expect(sys).toContain('still-present')
     expect(sys).toContain('resolved')
     expect(sys).toContain('cannot-tell')
@@ -187,7 +194,7 @@ describe('runRecheckPass', () => {
     await runRecheckPass({ previous: THREE, input: inputFixture(), spentUsd: 0 })
     const seen = JSON.parse(readFileSync(record, 'utf8'))
     expect(seen.stdin).toContain('`file` copied exactly')
-    const sys = seen.argv[seen.argv.indexOf('--append-system-prompt') + 1]
+    const sys = systemPromptOf(seen)
     expect(sys).toContain('is discarded')
     // The schema the CLI enforces asks for it too, so a model that ignores the prose still answers
     // in the shape.

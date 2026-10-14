@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { beforeEach, describe, expect, it } from 'vitest'
 import * as tar from 'tar'
@@ -222,7 +222,7 @@ describe('materialiseSkills — the cache belongs to this user, and only exists 
     const [winner] = await materialiseSkills([gitSource], join(root, 'elsewhere'), {
       fetch: async () => createReadStream(tgz),
     })
-    const entry = join(realpathSync(cacheDir), winner.path.slice(winner.path.lastIndexOf('/') + 1))
+    const entry = join(realpathSync(cacheDir), basename(winner.path))
     const out = await materialiseSkills([gitSource], cacheDir, {
       fetch: async () => {
         // The other run finishes between this one's check and its rename.
