@@ -97,6 +97,22 @@ importers:
         specifier: ^4.6.3
         version: 4.6.3
 
+  packages/sdk:
+    dependencies:
+      '@octokit/core':
+        specifier: ^7.0.8
+        version: 7.0.8
+      '@review-agent/core':
+        specifier: workspace:*
+        version: link:../core
+      '@review-agent/github':
+        specifier: workspace:*
+        version: link:../github
+    devDependencies:
+      tar:
+        specifier: ^7.4.3
+        version: 7.5.22
+
 packages:
 
   '@bugsnag/cuid@3.2.2':

@@ -9,6 +9,7 @@ import { SHIP_SOURCEMAPS as APP_SOURCEMAPS } from '../packages/app/sourcemaps'
 import { SHIP_SOURCEMAPS as CLI_SOURCEMAPS } from '../packages/cli/sourcemaps'
 import { SHIP_SOURCEMAPS as CORE_SOURCEMAPS } from '../packages/core/sourcemaps'
 import { SHIP_SOURCEMAPS as GITHUB_SOURCEMAPS } from '../packages/github/sourcemaps'
+import { SHIP_SOURCEMAPS as SDK_SOURCEMAPS } from '../packages/sdk/sourcemaps'
 
 const REPO = join(import.meta.dirname, '..')
 
@@ -20,6 +21,7 @@ const PUBLISHED: readonly { dir: string; shipSourcemaps: boolean }[] = [
   { dir: 'cli', shipSourcemaps: CLI_SOURCEMAPS },
   { dir: 'core', shipSourcemaps: CORE_SOURCEMAPS },
   { dir: 'github', shipSourcemaps: GITHUB_SOURCEMAPS },
+  { dir: 'sdk', shipSourcemaps: SDK_SOURCEMAPS },
 ]
 
 /** Packed whatever `files` says: pnpm adds the manifest, and the workspace root's LICENSE when the
@@ -288,8 +290,16 @@ describe('what a published tarball carries', () => {
     }
   })
 
+  it('publishes every package at one version, so they are released together', () => {
+    // docs/library.md promises it ("all released together at the same version"), and the check below
+    // only sees it between packages that depend on each other: a package nothing depends on — the
+    // CLI, or the SDK since 0.2.0 — could be left behind at the last version without failing it.
+    const versions = new Set(packed.map((p) => p.version))
+    expect([...versions], packed.map((p) => `${p.name}@${p.version}`).join(', ')).toHaveLength(1)
+  })
+
   it('replaces every workspace link with the version being published', () => {
-    // pnpm rewrites workspace:* to the target's EXACT version, so the four packages move in
+    // pnpm rewrites workspace:* to the target's EXACT version, so the packages move in
     // lockstep: github@0.1.0 requires core@0.1.0 and nothing else will do.
     const versions = new Map(packed.map((p) => [p.name, p.version]))
     for (const p of packed) {

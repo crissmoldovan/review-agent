@@ -1,20 +1,41 @@
 # Library reference
 
-The reviewer is published as four npm packages, all under Apache-2.0, all requiring Node.js 22 or newer, all
+The reviewer is published as five npm packages, all under Apache-2.0, all requiring Node.js 22 or newer, all
 released together at the same version.
 
 | Package | What it is | Depends on |
 |---|---|---|
+| [`@review-agent/sdk`](#review-agentsdk) | the review as one call from your own code: `reviewPullRequest()` — see [the SDK](sdk.md) | `core`, `github` |
 | [`@review-agent/core`](#review-agentcore) | the engine: settings, prompts, running Claude Code, findings, the check and re-check passes, the record, the secret scan | nothing GitHub-specific |
 | [`@review-agent/github`](#review-agentgithub) | GitHub: read a pull request, download the code, decide what to post, post it, keep the re-review marker | `core` |
 | [`@review-agent/app`](#review-agentapp) | the GitHub App: manifest, credentials, and the [receiver](#the-receiver) (`@review-agent/app/receiver`) | `core`, `github` |
-| `@review-agent/cli` | the `review-agent` command — see [the CLI](cli.md) | all three |
+| `@review-agent/cli` | the `review-agent` command — see [the CLI](cli.md) | `app`, `core`, `github` |
 
 Each package ships compiled JavaScript with type declarations (`dist/`), and no source maps. The packages pin each
 other exactly: `@review-agent/github@0.1.3` requires `@review-agent/core@0.1.3`.
 
 The trigger.dev tasks are **not** in the published packages; they are deployed from this repository
 ([deploying](deploying.md#5-deploy-the-runner)).
+
+## `@review-agent/sdk`
+
+```ts
+import { reviewPullRequest } from '@review-agent/sdk'
+```
+
+The embeddable entry point: `prepareReview` and `runReviewSession` from `@review-agent/github`, behind one call that
+validates its options, builds the GitHub client and the model credential for this review only, gates on `authorize`,
+picks the reporter, and removes the checkout. It does not depend on `@review-agent/app`, so it never installs
+trigger.dev. Every option, result and example: [the SDK](sdk.md).
+
+| Export | What it is |
+|---|---|
+| `reviewPullRequest(options) → Promise<ReviewResult>` | reviews one pull request; returns `reviewed`, `unfinished`, `refused` or `failed`, and throws only for a missing or wrong-typed option, or a process no review can run in (no model credential, two, or `ANTHROPIC_BASE_URL` set) |
+| `ReviewOptions`, `GitHubAccess`, `CredentialOption`, `ReviewSettings`, `MultiOption`, `AuthorizeRequest` | the options: `ReviewSettings` is any part of a `DeploymentConfig`, merged over the defaults key by key; `AuthorizeRequest` is what `authorize` is asked, shaped so `pushAccessOf` fits as it is |
+| `ReviewResult`, `ReviewedResult`, `UnfinishedResult`, `RefusedResult`, `FailedResult`, `PostedSummary`, `ReportResult` | the outcomes |
+| `ProgressEvent`, `StageEvent`, `NoteEvent`, `ProgressStage` | what `onProgress` hears |
+| `pushAccessOf`, `DEFAULT_SESSION_DEADLINE_MS`, and the types `ReportWant`, `ReportKind`, `CheckConclusion`, `PostedComment`, `PublishCounts`, `SessionStage`, `StoppedBy` | re-exported from `@review-agent/github` |
+| `defaultDeploymentConfig`, `SecretValue`, and the types `DeploymentConfig`, `ReviewRecord`, `Finding`, `Tier`, `Effort`, `ReportMode`, `Lens`, `Usage` | re-exported from `@review-agent/core` |
 
 ## The receiver
 
