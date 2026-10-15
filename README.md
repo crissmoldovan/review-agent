@@ -148,8 +148,15 @@ subscription's allowance instead of billed. trigger.dev bills its compute separa
 | [Deploying](docs/deploying.md) | the receiver, the runner, the record callback, the sweep, troubleshooting |
 | [How it works](docs/how-it-works.md) | one review step by step, the passes, the record |
 | [Security model](docs/security.md) | what the reviewer can and cannot do, and why |
+| [Guides](docs/guides/README.md) | which guide for which goal |
+| [Your first review in five minutes](docs/guides/first-review.md) | a pull request reviewed and printed in your terminal — Windows, macOS, Linux |
+| [Post a review as yourself](docs/guides/post-as-yourself.md) | `--post`: the review on the pull request under your name, re-reviews, and what your token can reach |
 | [Run your own server](docs/guides/self-hosting.md) | every pull request reviewed by your App from one Docker container on your own server — no trigger.dev |
 | [Review with GitHub Actions](docs/guides/github-actions.md) | every pull request reviewed by a workflow — no App, no server |
+| [Review from another CI](docs/guides/other-ci.md) | Jenkins, CircleCI, Buildkite, GitLab CI — with a bot account's token or your App's |
+| [The webhook on Vercel](docs/guides/vercel.md) | your App's receiver on Vercel, its runner on trigger.dev |
+| [Choosing a tier](docs/guides/choosing-a-tier.md) | which tier when, the multi-reviewer mode and budgets, with worked examples |
+| [Troubleshooting](docs/guides/troubleshooting.md) | every message you can act on, by symptom, whichever way in |
 | [The SDK](docs/sdk.md) | embedding the reviewer in your own service or script: every option, result and example |
 | [Library reference](docs/library.md) | the five packages and their exports |
 | [Changelog](CHANGELOG.md) | what changed in each release |

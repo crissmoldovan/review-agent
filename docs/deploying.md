@@ -29,7 +29,7 @@ never leaves your App, your runner and Anthropic. See [security](security.md).
 - A [trigger.dev](https://trigger.dev) account and an empty project (the runner is built for trigger.dev v4, SDK
   `4.5.16`).
 - Somewhere to host the receiver: any server or platform that can answer an HTTPS POST from Node.js 22 — a Next.js
-  route on Vercel, an Express or Hono server, a serverless function.
+  route on Vercel ([step by step](guides/vercel.md)), an Express or Hono server, a serverless function.
 - An Anthropic credential: an **API key**, or a Claude **subscription token** from `claude setup-token`.
 - Node.js 22, pnpm 11 and git, to deploy the runner from this repository.
 
@@ -345,6 +345,8 @@ registers itself with the deploy. A receiver's `TRIGGER_SECRET_KEY` needs nothin
 focus task, with its own credentials.
 
 ## When something goes wrong
+
+Every message the reviewer prints that you can act on, whichever way in: [troubleshooting](guides/troubleshooting.md).
 
 | Symptom | Likely cause |
 |---|---|

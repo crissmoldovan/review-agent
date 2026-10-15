@@ -11,6 +11,9 @@ is your token — and reports the outcome on the commit.
 | [`review-agent init`](#review-agent-init) | registers a GitHub App for a deployment, through GitHub's manifest flow |
 | `review-agent --version` | prints the version |
 
+Step by step: [your first review](guides/first-review.md), [post a review as yourself](guides/post-as-yourself.md),
+[from another CI](guides/other-ci.md). When something goes wrong: [troubleshooting](guides/troubleshooting.md).
+
 ## Install
 
 The same in a POSIX shell and in PowerShell:

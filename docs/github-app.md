@@ -96,3 +96,6 @@ at all: it only checks webhook signatures. See [security](security.md).
 
 The private key may be pasted with its line breaks flattened, or with literal `\n` sequences, as many secret stores
 do; the runner restores them.
+
+The same App can post from another CI, with an installation token minted for each review:
+[review from another CI](guides/other-ci.md#1b-an-app-installation-token).

@@ -157,6 +157,8 @@ Only what is yours to fix in code or configuration, and always before anything i
 - a `TypeError` when `authorize` answers something other than `true` or `false` — a gate that forgot to answer is not
   a yes. Nothing has been downloaded or spent when it does.
 
+Each message, and each result's reason, by symptom: [troubleshooting](guides/troubleshooting.md#the-sdk).
+
 ## Progress
 
 `onProgress` hears where the review has got to. Every event carries `repo` and `pr`, so one handler can follow several

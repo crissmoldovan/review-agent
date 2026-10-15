@@ -54,7 +54,8 @@ reaches it — so set it the same in both.
 
 ### Tiers
 
-A tier is a named preset. A request picks one; the default is `basic`.
+A tier is a named preset. A request picks one; the default is `basic`. When to ask for which, with worked examples:
+[choosing a tier](guides/choosing-a-tier.md).
 
 | Tier | Effort | Check pass | Soft budget | Hard ceiling | Notes |
 |---|---|---|---|---|---|

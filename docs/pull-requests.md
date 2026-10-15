@@ -44,7 +44,7 @@ The retry logic moved into the client. Check every caller still handles a 429.
 
 | Flag | Values | What it does |
 |---|---|---|
-| `--tier` | `basic`, `normal`, `thorough` | a bigger preset: more effort and a larger budget. See [tiers](configuration.md#tiers) |
+| `--tier` | `basic`, `normal`, `thorough` | a bigger preset: more effort and a larger budget. See [tiers](configuration.md#tiers), and [choosing a tier](guides/choosing-a-tier.md) for when to ask for which |
 | `--effort` | `low`, `medium`, `high`, `xhigh`, `max` | how hard the model thinks |
 | `--model` | a model name | which model reviews |
 | `--budget` | dollars | a **lower** budget for this review |
@@ -210,8 +210,9 @@ When a pull request that has been reviewed is reviewed again (by `/review` or **
 A comment is only ever appended to, never deleted, and only the reviewer's own comments on this pull request are
 edited. `cannot-tell`, or no answer, leaves a finding as it was.
 
-This pass costs extra — a quarter of the review's budget at most — and runs only when it fits under the review's
-ceiling. A first review never pays for it.
+This pass costs extra: its own target is a quarter of the review's soft budget, and its own ceiling 2.5 times that —
+$0.50 and $1.25 on `basic` ([budgets](configuration.md#budgets)) — and it runs only when that ceiling still fits under
+the review's ceiling after what the review and its check pass have spent. A first review never pays for it.
 
 > **Status:** the re-review pass is new in `0.1.1` and is covered by unit tests only; it has not yet been run against
 > a live model. Treat "No longer reported" as one reviewer's answer at one commit.
