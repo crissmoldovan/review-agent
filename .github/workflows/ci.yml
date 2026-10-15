@@ -69,5 +69,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
       # The version packages/app/trigger.config.ts pins (CLAUDE_CODE_VERSION).
-      - run: npm install --global @anthropic-ai/claude-code@2.1.258
+      # --allow-scripts: npm 12 skips a dependency's install script otherwise, leaving a placeholder (spike S2).
+      - run: npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.258
       - run: node scripts/claude-smoke.mjs

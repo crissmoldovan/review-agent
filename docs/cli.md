@@ -47,7 +47,11 @@ review-agent review --repo <owner/name> --pr <number> [options]
      its script to put the real binary in place — without it, `claude` is a small placeholder. The reviewer
      recognises the placeholder and stops with *"Claude Code's native binary is not installed — npm skipped its
      install script"*, naming the file and the fix: reinstall with the package's install script allowed, or use
-     Anthropic's installer.
+     Anthropic's installer. The command that works on npm 10, 11 and 12 alike (tested 2026-10-15):
+
+     ```sh
+     npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
+     ```
 2. **A model credential**, at most one of:
    - `ANTHROPIC_API_KEY` — an Anthropic API key, billed at per-token API prices;
    - `CLAUDE_CODE_OAUTH_TOKEN` — a subscription token from `claude setup-token`, drawn from that
