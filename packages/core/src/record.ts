@@ -13,7 +13,7 @@ export const RECORD_VERSION = 1 as const
 /** The version of this engine, on every record it writes. Kept in step with
  *  `packages/core/package.json` by `record.test.ts` — a record whose engine version is a guess is
  *  worth less than no record at all (design §4.7). */
-export const ENGINE_VERSION = '0.2.0'
+export const ENGINE_VERSION = '0.2.1'
 
 export type RecordedSkill = { id: string; path: string }
 

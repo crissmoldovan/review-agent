@@ -47,6 +47,7 @@ type Manifest = {
   bin?: Record<string, string>
   exports?: Record<string, ExportCondition>
   dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
   engines?: { node?: string }
   repository?: { type: string; url: string; directory: string }
   publishConfig?: { access?: string }
@@ -313,7 +314,9 @@ describe('what a published tarball carries', () => {
 
   it('imports nothing it does not declare, so an adopter who installs it can run it', () => {
     for (const p of packed) {
-      const declared = Object.keys(p.manifest.dependencies ?? {})
+      // A peer is declared too: @review-agent/app's receiver imports @trigger.dev/sdk lazily, as an
+      // optional peer the host installs (0.2.1).
+      const declared = [...Object.keys(p.manifest.dependencies ?? {}), ...Object.keys(p.manifest.peerDependencies ?? {})]
       for (const path of p.paths.filter((f) => f.endsWith('.js') || f.endsWith('.mjs'))) {
         const source = fromTarball(p.tarball, path)
         for (const specifier of bareImports(source)) {

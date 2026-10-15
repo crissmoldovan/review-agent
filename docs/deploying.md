@@ -71,8 +71,12 @@ The receiver does three things, in this order, and answers GitHub straight away:
 Install the library in your receiver's project:
 
 ```sh
-npm install @review-agent/app @review-agent/core
+npm install @review-agent/app @review-agent/core @trigger.dev/sdk
 ```
+
+`@trigger.dev/sdk` is what `sdkTriggerPort` uses; since 0.2.1 the App package lists it as an optional peer rather than
+installing it, so a host that triggers some other way never carries it.
+
 
 A complete receiver as a Next.js App Router route, `app/api/github/webhook/route.ts`:
 
@@ -258,7 +262,7 @@ finding became — set `REVIEW_AGENT_RECORD_URL` (it must be `https://`) and a s
     "result": {
       "kind": "reviewed",
       "headSha": "…",                      // the commit reviewed
-      "record": { "recordVersion": 1, "engineVersion": "0.2.0", "…": "…" },   // see How it works
+      "record": { "recordVersion": 1, "engineVersion": "0.2.1", "…": "…" },   // see How it works
       "reviewId": 77,                      // the GitHub review, or null
       "summaryCommentId": 903,             // the summary comment, or null
       "counts": {

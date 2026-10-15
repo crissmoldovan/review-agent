@@ -12,7 +12,7 @@ released together at the same version.
 | `@review-agent/cli` | the `review-agent` command — see [the CLI](cli.md) | `app`, `core`, `github` |
 
 Each package ships compiled JavaScript with type declarations (`dist/`), and no source maps. The packages pin each
-other exactly: `@review-agent/github@0.2.0` requires `@review-agent/core@0.2.0`.
+other exactly: `@review-agent/github@0.2.1` requires `@review-agent/core@0.2.1`.
 
 The trigger.dev tasks are **not** in the published packages; they are deployed from this repository
 ([deploying](deploying.md#5-deploy-the-runner)). The review they run is, for other hosting:
@@ -96,7 +96,8 @@ type TriggerPort = (a: {
 }) => Promise<{ id: string }>
 ```
 
-`sdkTriggerPort` triggers through `@trigger.dev/sdk`, which reads `TRIGGER_SECRET_KEY` from the environment. To use a
+`sdkTriggerPort` triggers through `@trigger.dev/sdk` — an optional peer since 0.2.1, so install it yourself — which reads
+`TRIGGER_SECRET_KEY` from the environment. To use a
 different client — another trigger.dev project, a key from a secret store, extra options such as a TTL — write your
 own `TriggerPort`; it is one function.
 

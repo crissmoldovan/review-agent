@@ -68,7 +68,7 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-ag
 The file pins two versions. Keep both pinned, and change them on purpose:
 
 - `@anthropic-ai/claude-code@2.1.258` — the Claude Code the reviewer's flags were measured against;
-- `@review-agent/cli@0.2.0` — the reviewer.
+- `@review-agent/cli@0.2.1` — the reviewer.
 
 ## 3. Open a pull request
 
@@ -192,7 +192,7 @@ different things on two runs of the same pull request.
 
 ## Upgrading
 
-Change `@review-agent/cli@0.2.0` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
+Change `@review-agent/cli@0.2.1` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
 a pull request — it is reviewed by the new version. Change `@anthropic-ai/claude-code@2.1.258` only when a release of
 the reviewer says to.
 

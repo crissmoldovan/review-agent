@@ -15,6 +15,10 @@ export default defineConfig({
   // Node cannot load from a built file. Bundling them is what makes `node dist/index.js` work both
   // here and for an adopter. Their npm imports (zod, tar, @octokit/core) stay external.
   noExternal: [/^@review-agent\//],
+  // Never bundled (0.2.1): the receiver code the CLI bundles imports @trigger.dev/sdk lazily, inside a
+  // function the CLI never calls. Bundling it shipped the whole trigger.dev SDK inside the CLI; left
+  // external, it is an optional peer that nothing installs.
+  external: ['@trigger.dev/sdk'],
   // There is no `onSuccess` copy step any more. It copied a wrap-up hook that was never built — the
   // wrap-up mechanism does not exist (engine.ts, `wrapUpFired`) — and it was POSIX shell (`cp`,
   // `2>/dev/null`, `|| true`), which fails the build under Windows' cmd.exe.

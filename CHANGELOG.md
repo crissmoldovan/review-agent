@@ -3,6 +3,16 @@
 All five packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app`, `@review-agent/cli` and
 `@review-agent/sdk` — are released together, at the same version (the SDK from 0.2.0).
 
+## 0.2.1 — 2026-10-15
+
+- **Installing the CLI no longer pulls in trigger.dev.** `@trigger.dev/sdk` — and the 18 advisories `npm audit`
+  reported through it (17 moderate, 1 high, in its WebSocket and OpenTelemetry dependencies; still present in its
+  latest release) — came with `@review-agent/cli` and `@review-agent/app`, though only a receiver using
+  `sdkTriggerPort` needs it. It is now an **optional peer** of both: nothing installs it for you. A receiver that
+  calls `sdkTriggerPort` installs it itself (`npm install @trigger.dev/sdk`), and gets a sentence naming that fix if
+  it has not. The App's trigger.dev runner is unchanged.
+- **The SDK has run for real**, installed from npm: a print-only review and a posted one on the demo repository.
+
 ## 0.2.0 — 2026-10-15
 
 **Three ways in, one review.** The reviewer now runs the same review session whichever way it is asked: the **GitHub

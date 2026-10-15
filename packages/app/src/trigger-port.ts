@@ -9,7 +9,17 @@ import type { TriggerPort } from './dispatch'
  *  Auth is `TRIGGER_SECRET_KEY`, read by the SDK from the environment. This module never reads it,
  *  never logs it, and never accepts it as an argument. */
 export const sdkTriggerPort: TriggerPort = async ({ taskId, payload, idempotencyKey, tags }) => {
-  const { tasks } = await import('@trigger.dev/sdk')
+  // An OPTIONAL peer since 0.2.1: only a receiver that triggers through trigger.dev's own SDK needs it,
+  // so the CLI and every other host no longer install it (and the advisories its WebSocket client
+  // carries). A host that calls this without it gets a sentence naming the fix, not a resolver trace.
+  let tasks: typeof import('@trigger.dev/sdk').tasks
+  try {
+    ;({ tasks } = await import('@trigger.dev/sdk'))
+  } catch (e) {
+    throw new Error(
+      'sdkTriggerPort needs the @trigger.dev/sdk package, which @review-agent/app does not install for you: ' +
+      'npm install @trigger.dev/sdk (or pass your own TriggerPort)', { cause: e })
+  }
   const handle = await tasks.trigger(taskId, payload, { idempotencyKey, tags })
   return { id: handle.id }
 }

@@ -60,9 +60,6 @@ importers:
       '@review-agent/github':
         specifier: workspace:*
         version: link:../github
-      '@trigger.dev/sdk':
-        specifier: 4.5.16
-        version: 4.5.16(zod@4.6.3)
       zod:
         specifier: ^4.6.3
         version: 4.6.3
@@ -70,6 +67,9 @@ importers:
       '@trigger.dev/build':
         specifier: 4.5.16
         version: 4.5.16(typescript@6.0.3)
+      '@trigger.dev/sdk':
+        specifier: 4.5.16
+        version: 4.5.16(zod@4.6.3)
 
   packages/cli:
     dependencies:
@@ -86,7 +86,7 @@ importers:
         specifier: workspace:*
         version: link:../github
       '@trigger.dev/sdk':
-        specifier: 4.5.16
+        specifier: ^4.5.16
         version: 4.5.16(zod@4.6.3)
       commander:
         specifier: ^15.0.0
