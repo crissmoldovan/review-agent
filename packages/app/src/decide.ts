@@ -2,7 +2,12 @@ import { z } from 'zod'
 import type { DeploymentConfig, Effort, ReviewRequest, Tier } from '@review-agent/core'
 // RERUN_IDENTIFIER is imported, never redefined and never re-exported: Task 6 owns the string because
 // Task 6 writes the button, and decide.test.ts imports it from the same place.
-import { MARKER_OPEN, RERUN_IDENTIFIER, refuseUnbuilt } from '@review-agent/github'
+import {
+  decodeRequestRefinement, encodeRequestRefinement, MARKER_OPEN, RERUN_IDENTIFIER, refuseUnbuilt,
+} from '@review-agent/github'
+
+// Re-exported from their new home, so the receiver's API is unchanged (0.2.0).
+export { decodeRequestRefinement, encodeRequestRefinement }
 
 /** Decision 4's refusals and the function every other doorway applies them with live in
  *  `@review-agent/github` since 0.2.0 (spec 0.2.0 §3.1), so the CLI and the SDK refuse exactly what
@@ -112,42 +117,6 @@ const splitCommand = (rest: string): { flags: Partial<ReviewRequest>; refused: s
   }
   const words = tokens.filter((_, i) => !consumed.has(String(i)))
   return { flags, refused, brief: [words.join(' '), ...tail].join('\n').trim() }
-}
-
-const Refinement = z.object({
-  tier: z.enum(['basic', 'normal', 'thorough']).optional(),
-  multi: z.boolean().optional(),
-  model: z.string().optional(),
-  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
-  check: z.boolean().optional(),
-  // no `brief`: it is never encoded (below), and an external_id from an older encoding that still
-  // carries one has it dropped here rather than replayed.
-  budgetUsd: z.number().optional(),
-})
-
-/** What "repeats the last request" needs: the settings, never the target. A check run's
- *  `external_id` is a string GitHub hands back untouched, so the settings of a review can ride
- *  along on the check run it produced without a database. Base64url keeps it out of trouble in a
- *  field whose escaping is not documented.
- *
- *  `brief` is dropped as well, and deliberately: it is free text a person typed after `/review`,
- *  and `external_id` is stored on the check run, readable by anyone who can read the check run and
- *  carried on every re-run for as long as it exists. A Re-run repeats the SETTINGS; whoever wants
- *  the brief again types it again. Base64url is an encoding, not a wrapper that makes text private. */
-export function encodeRequestRefinement(r: ReviewRequest): string {
-  const { repo: _repo, pr: _pr, headSha: _headSha, requestedBy: _by, requestId: _id,
-          brief: _brief, ...settings } = r
-  return Buffer.from(JSON.stringify(settings), 'utf8').toString('base64url')
-}
-
-export function decodeRequestRefinement(s: string | null | undefined): Partial<ReviewRequest> | null {
-  if (s === null || s === undefined || s === '') return null
-  try {
-    const parsed = Refinement.safeParse(JSON.parse(Buffer.from(s, 'base64url').toString('utf8')) as unknown)
-    return parsed.success ? parsed.data : null
-  } catch {
-    return null // a check run this App did not create, or one from an older encoding
-  }
 }
 
 const CheckRunEvent = z.object({

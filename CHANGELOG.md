@@ -182,6 +182,23 @@ trigger key and the record callback are as they were. The new `review-agent-focu
 deploy, and only the runner starts it. A deployment that edited `runnerDeployment()` re-applies that edit, as on
 every upgrade.
 
+### Stage 7 — examples
+
+- **Run it on your own server.** `examples/server` is the receiver, an in-process queue and the SDK in one Node.js 22
+  process, posting as your App with no trigger.dev: bounded, deduplicated on the receiver's idempotency key, one
+  review at a time by default, the release-only rule and the push-access gate as in the App, a clean `SIGTERM`, and
+  logs that never carry a secret. Its Dockerfile is Debian, non-root, with Claude Code 2.1.258 pinned and its binary
+  checked at build time. [Run your own server](docs/guides/self-hosting.md).
+- **Review pull requests in GitHub Actions.** `examples/github-actions/review.yml` runs the CLI on open, on ready for
+  review and on `/review` from someone with push access, posting as `github-actions[bot]` with a `review-agent` check
+  run. Pull requests from forks and Dependabot are skipped with a notice; it never uses `pull_request_target`.
+  [Review with GitHub Actions](docs/guides/github-actions.md).
+- Both are workspace members, so CI builds, type-checks and tests them with the packages, and a test fails if either
+  drifts from the Claude Code version the App runner pins.
+- **Re-run repeats the settings wherever a review came from.** The settings a check run carries for its Re-run button
+  are now stamped by the shared review session, so the CLI's, the SDK's and the self-hosted server's check runs carry
+  them as the App's always did (`encodeRequestRefinement` moved to `@review-agent/github`; the App still exports it).
+
 ### Stage 8 — continuous integration
 
 - **Windows is required** on every pull request, beside Linux (Node 22 and 24) and macOS, and an **Alpine** job runs

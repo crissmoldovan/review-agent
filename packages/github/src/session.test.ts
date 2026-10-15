@@ -1,3 +1,4 @@
+import { decodeRequestRefinement } from './refinement'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -297,6 +298,15 @@ describe('runReviewSession: posting (spec 0.2.0 §3)', () => {
     const gh = fakeGitHub()
     await session({ gh, reporter: checkRunReporter(), extra: { externalId: 'eyJ0aWVyIjoibm9ybWFsIn0' } })
     expect(only(gh.calls, CREATE_RUN)[0].params.external_id).toBe('eyJ0aWVyIjoibm9ybWFsIn0')
+  })
+
+  it('stamps the asked-for settings itself when the caller passes none — a CLI, SDK or server check run re-runs as asked', async () => {
+    const gh = fakeGitHub()
+    await session({ gh, reporter: checkRunReporter(), ask: { tier: 'normal', effort: 'high', brief: 'look at refunds' } })
+    const stamped = decodeRequestRefinement(String(only(gh.calls, CREATE_RUN)[0].params.external_id))
+    expect(stamped).toMatchObject({ tier: 'normal', effort: 'high' })
+    // The brief is free text a person typed; it never rides on the check run.
+    expect(stamped).not.toHaveProperty('brief')
   })
 })
 

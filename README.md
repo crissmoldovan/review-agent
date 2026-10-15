@@ -86,6 +86,11 @@ GitHub App below. Every flag: [the CLI reference](docs/cli.md).
 
 The receiver never holds the App's key or a model credential; the runner never faces the internet.
 
+**Other ways to run it.** Without trigger.dev: the receiver, a queue and the SDK in one container on your own server —
+[examples/server](examples/server/README.md), guide: [Run your own server](docs/guides/self-hosting.md). Without an App
+or a server: a GitHub Actions workflow that runs the CLI — [examples/github-actions](examples/github-actions/README.md),
+guide: [Review with GitHub Actions](docs/guides/github-actions.md).
+
 ## On a pull request
 
 - **Automatically** when a pull request opens (not as a draft) or is marked ready for review. Not on every push.
@@ -143,6 +148,8 @@ subscription's allowance instead of billed. trigger.dev bills its compute separa
 | [Deploying](docs/deploying.md) | the receiver, the runner, the record callback, the sweep, troubleshooting |
 | [How it works](docs/how-it-works.md) | one review step by step, the passes, the record |
 | [Security model](docs/security.md) | what the reviewer can and cannot do, and why |
+| [Run your own server](docs/guides/self-hosting.md) | every pull request reviewed by your App from one Docker container on your own server — no trigger.dev |
+| [Review with GitHub Actions](docs/guides/github-actions.md) | every pull request reviewed by a workflow — no App, no server |
 | [The SDK](docs/sdk.md) | embedding the reviewer in your own service or script: every option, result and example |
 | [Library reference](docs/library.md) | the five packages and their exports |
 | [Changelog](CHANGELOG.md) | what changed in each release |
@@ -175,6 +182,7 @@ The end-to-end tests (`pnpm test:e2e`) call real GitHub and a real model, so the
 | `packages/github` | the GitHub adapter |
 | `packages/app` | the App, the receiver, and the trigger.dev tasks (`src/tasks`, `trigger.config.ts`) |
 | `packages/cli` | the command line |
+| `examples/` | the server and the GitHub Actions workflow — built, type-checked and tested with the packages |
 | `test/` | checks on what the published packages contain |
 
 ## Licence

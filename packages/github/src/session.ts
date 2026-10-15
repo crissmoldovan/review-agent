@@ -1,3 +1,4 @@
+import { encodeRequestRefinement } from './refinement'
 import type { Octokit } from '@octokit/core'
 import {
   resolveSettings, scanForSecrets, SecretLeak, writesSummaryComment,
@@ -373,7 +374,10 @@ export async function runReviewSession(a: {
     try {
       handle = await (a.reporter ?? noReporter).start({
         octokit, owner, repo, headSha: pr.headSha, name: settings.report.checkRunName,
-        ...(a.externalId !== undefined && { externalId: a.externalId }),
+        // The settings a Re-run repeats (design §5). A caller may pass its own; otherwise the session
+        // stamps what was asked, less what was refused — so the CLI's, the SDK's and the self-hosted
+        // server's check runs carry them too, not only the App's (0.2.0).
+        externalId: a.externalId ?? encodeRequestRefinement({ ...prepared.ask, repo: `${owner}/${repo}`, pr: number, headSha: pr.headSha }),
         gate: gateOf(settings.report), mode: configuredMode,
         maxInline: settings.report.maxInline, bands: settings.severity.bands, log,
       })

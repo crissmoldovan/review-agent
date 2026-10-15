@@ -47,7 +47,7 @@ environment, under **Environment Variables**, set:
 |---|---|---|
 | `REVIEW_AGENT_APP_CLIENT_ID` | yes | the App's client id (`Iv23li…`) — not the numeric App ID |
 | `REVIEW_AGENT_APP_PRIVATE_KEY` | yes | the whole `.pem` you generated, `-----BEGIN` to `-----END`. Flattened line breaks are repaired |
-| `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN` | **exactly one** | the model credential. Neither, or both, and every review is refused before it starts |
+| `ANTHROPIC_API_KEY` | **yes** | the model credential: an Anthropic API key, billed at per-token API prices. The runner also accepts `CLAUDE_CODE_OAUTH_TOKEN` (a Claude subscription token) instead, but Anthropic's terms limit subscription tokens to a person's own use, so a deployment reviewing an organisation's pull requests uses an API key ([security](security.md), spec 0.2.0 §2.3). Exactly one may be set: neither, or both, and every review is refused before it starts |
 | `REVIEW_AGENT_SWEEP_TARGETS` | no | the repositories the [hourly sweep](#the-hourly-sweep) looks after |
 | `REVIEW_AGENT_RECORD_URL` | no | where to send each finished review's [signed record](#the-review-record-callback) |
 | `REVIEW_AGENT_RECORD_SECRET_ENV` | no | the **name** of the variable holding the record's signing secret; default `REVIEW_AGENT_RECORD_SECRET` |
