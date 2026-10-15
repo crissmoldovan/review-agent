@@ -214,8 +214,10 @@ This pass costs extra: its own target is a quarter of the review's soft budget, 
 $0.50 and $1.25 on `basic` ([budgets](configuration.md#budgets)) — and it runs only when that ceiling still fits under
 the review's ceiling after what the review and its check pass have spent. A first review never pays for it.
 
-> **Status:** the re-review pass is new in `0.1.1` and is covered by unit tests only; it has not yet been run against
-> a live model. Treat "No longer reported" as one reviewer's answer at one commit.
+> **Status:** the re-review pass is new in `0.1.1`. It first ran against a live model on 2026-10-15, on the demo
+> repository's pull request #13: a repair that wrapped the faulty line rather than deleting it — the shape the two
+> earlier designs missed — was judged resolved and its comment marked "No longer reported". One run is one sample:
+> treat "No longer reported" as one reviewer's answer at one commit.
 
 ## What the reviewer will not do
 

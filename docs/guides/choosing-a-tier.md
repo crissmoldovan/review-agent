@@ -60,7 +60,7 @@ The demo repository's pull requests, and the tier each calls for:
 | [#3](https://github.com/crissmoldovan/review-agent-demo/pull/9) `fix/refund-rounding` — a rounding bug in money | `normal` | money: a subtle bug is costly, and worth more reading |
 | [#4](https://github.com/crissmoldovan/review-agent-demo/pull/10) `feat/session-rotation` — a security flaw | `thorough`, or `--multi` | security-critical, and every caller of the session is affected |
 | [#5](https://github.com/crissmoldovan/review-agent-demo/pull/11) `chore/bump-zod` — a version bump | none | nothing to review but a version. An App deployment and [your own server](self-hosting.md) skip it automatically, because every changed file is a release file. The CLI and the GitHub Actions workflow have no such rule — they review what they are pointed at — so do not ask |
-| [#6](https://github.com/crissmoldovan/review-agent-demo/pull/12) `feat/retry-backoff` — an off-by-one, then a fix | `basic`, then a re-review after the fix | the second posted review asks whether the first one's findings are still there ([re-reviews](post-as-yourself.md#6-review-again-after-a-change)) |
+| [#6](https://github.com/crissmoldovan/review-agent-demo/pull/13) `feat/retry-backoff` — an off-by-one, then a fix | `basic`, then a re-review after the fix | the second posted review asks whether the first one's findings are still there ([re-reviews](post-as-yourself.md#6-review-again-after-a-change)) |
 | a 4,000-line generated client, with a small hand-written wrapper | `basic`, with a brief pointing at the hand-written part | effort spent on generated code is wasted |
 
 For the last, the brief is a note to the reviewer — information that can point its attention, never a change to its

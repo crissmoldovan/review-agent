@@ -6,7 +6,7 @@ automated review you ran from the command line, and a commit status named `revie
 will also know how to answer a finding, how to have the pull request reviewed again after a change, and what your
 GitHub token can reach (use case UC-3 in [the 0.2.0 spec](../specs/0.2.0-ways-in.md#1-use-cases)).
 
-<!-- capture: post-yourself-pr6-screenshot — a screenshot of demo pull request #12 (feat/retry-backoff) after the first `review-agent review --repo crissmoldovan/review-agent-demo --pr 12 --post`, run by the demo repository's owner at the pull request's first commit: the conversation showing the summary comment with its automated line, the review with one inline comment, and the `review-agent` commit status in the checks box. Version and date. -->
+<!-- capture: post-yourself-pr6-screenshot — a screenshot of demo pull request #12 (feat/retry-backoff) after the first `review-agent review --repo crissmoldovan/review-agent-demo --pr 13 --post`, run by the demo repository's owner at the pull request's first commit: the conversation showing the summary comment with its automated line, the review with one inline comment, and the `review-agent` commit status in the checks box. Version and date. -->
 *(captured output will appear here)*
 
 **Use a pull request in a repository you can push to.** The examples use demo pull request #12,
@@ -67,7 +67,7 @@ Ready for `review-agent review --post`.
 ## 2. Post the review
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 12 --post
+review-agent review --repo crissmoldovan/review-agent-demo --pr 13 --post
 ```
 
 The reviewer reads the pull request and the repository's settings file, then asks — once, before it downloads
@@ -92,11 +92,11 @@ the summary are posted, and the status is set to its outcome. stdout is the revi
 code's (`packages/cli/src/review-command.ts`), the numbers and link invented:
 
 ```text
-posted 2 inline comments and a summary comment: https://github.com/crissmoldovan/review-agent-demo/pull/12#issuecomment-…
+posted 2 inline comments and a summary comment: https://github.com/crissmoldovan/review-agent-demo/pull/13#issuecomment-…
 reported with a commit status: success
 ```
 
-<!-- capture: post-yourself-pr6-confirm — the question exactly as the terminal shows it (stderr) for `review-agent review --repo crissmoldovan/review-agent-demo --pr 12 --post`, run by the demo repository's owner at the pull request's first commit, before answering y. -->
+<!-- capture: post-yourself-pr6-confirm — the question exactly as the terminal shows it (stderr) for `review-agent review --repo crissmoldovan/review-agent-demo --pr 13 --post`, run by the demo repository's owner at the pull request's first commit, before answering y. -->
 *(captured output will appear here)*
 
 <!-- capture: post-yourself-pr6-first-stdout — stdout and stderr of the same run after answering y, full, in the order the terminal shows them. Version and date. -->
@@ -139,7 +139,7 @@ that could not go on a changed line), **Could not be settled**, **Not in the che
 read) and **Not honoured** (anything asked for and not done). It ends with a hidden marker: the reviewer's memory of
 this pull request. Do not edit it.
 
-<!-- capture: post-yourself-pr6-summary-comment — the summary comment from the first post on PR #12, as GitHub renders it (a screenshot), and its Markdown source copied from the comment's edit box with the hidden marker line removed. Version and date. -->
+<!-- capture: post-yourself-pr6-summary-comment — the summary comment from the first post on PR #13, as GitHub renders it (a screenshot), and its Markdown source copied from the comment's edit box with the hidden marker line removed. Version and date. -->
 *(captured output will appear here)*
 
 ### Inline comments
@@ -152,7 +152,7 @@ there is no review, only the summary comment. A review that did not complete —
 included — places nothing on a line: its summary says **This review did not complete** and why, and lists what it had
 found by then.
 
-<!-- capture: post-yourself-pr6-inline-comment — one inline comment from the first post on PR #12, as GitHub renders it (a screenshot). -->
+<!-- capture: post-yourself-pr6-inline-comment — one inline comment from the first post on PR #13, as GitHub renders it (a screenshot). -->
 *(captured output will appear here)*
 
 ### The commit status
@@ -170,7 +170,7 @@ From the command line a finished review is always `success`: the [gate](../confi
 `failure` is a deployment setting, and the CLI reads no configuration of its own. A review that did not run reports
 `success` too, saying it is **not a verdict**, so an outage never blocks a merge.
 
-<!-- capture: post-yourself-pr6-status — a screenshot of the checks box on PR #12 after the first post, with the `review-agent` commit status and its description visible. -->
+<!-- capture: post-yourself-pr6-status — a screenshot of the checks box on PR #13 after the first post, with the `review-agent` commit status and its description visible. -->
 *(captured output will appear here)*
 
 **A commit status is a soft gate.** A branch rule can require a status named `review-agent`, but it cannot pin it to
@@ -189,7 +189,7 @@ source ([spec 0.2.0 §2.2](../specs/0.2.0-ways-in.md#22-what-each-github-identit
 | `none` | the review and the summary, and nothing on the commit | no push access |
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 12 --post --report none
+review-agent review --repo crissmoldovan/review-agent-demo --pr 13 --post --report none
 ```
 
 ## 5. Answer a finding: `/dispute` and `/defer`
@@ -212,7 +212,7 @@ More: [answering a finding](../pull-requests.md#answering-a-finding).
 Push the fix, then run the same command:
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 12 --post
+review-agent review --repo crissmoldovan/review-agent-demo --pr 13 --post
 ```
 
 With `--post` the reviewer reads its earlier summary comment on the pull request — the one your login posted, when
@@ -230,13 +230,13 @@ The summary comment is edited in place rather than a second one posted. `--no-re
 still edits that summary. Run by somebody else with their own token, the review cannot edit your comments: it posts a
 summary of its own, carrying the earlier reviews' memory forward.
 
-> **Status:** the re-review pass is covered by unit tests only and has not yet been run against a live model
-> ([README](../../README.md#status)). The capture below records one run of it.
+> **Status:** the capture below is the re-review pass's first run against a live model (2026-10-15). One run is one
+> sample: treat "No longer reported" as one reviewer's answer at one commit.
 
-<!-- capture: post-yourself-pr6-rereview-stdout — stdout and stderr of the second `review-agent review --repo crissmoldovan/review-agent-demo --pr 12 --post`, run by the demo repository's owner after the fix commit is on the branch (the first post having been made before it), answering y. Full; note the cost line's `re-review $…` part if present. Version and date. -->
+<!-- capture: post-yourself-pr6-rereview-stdout — stdout and stderr of the second `review-agent review --repo crissmoldovan/review-agent-demo --pr 13 --post`, run by the demo repository's owner after the fix commit is on the branch (the first post having been made before it), answering y. Full; note the cost line's `re-review $…` part if present. Version and date. -->
 *(captured output will appear here)*
 
-<!-- capture: post-yourself-pr6-no-longer-reported — a screenshot of the first review's inline comment on PR #12 after that second run, showing the appended "No longer reported." note — or, if the re-review pass judged the finding otherwise, the comment as it stands and the second summary comment, so the guide can say what happened. -->
+<!-- capture: post-yourself-pr6-no-longer-reported — a screenshot of the first review's inline comment on PR #13 after that second run, showing the appended "No longer reported." note — or, if the re-review pass judged the finding otherwise, the comment as it stands and the second summary comment, so the guide can say what happened. -->
 *(captured output will appear here)*
 
 ## 7. When posting fails: exit 4
@@ -259,9 +259,9 @@ so it is not lost. Running it again pays for the model again: fix what GitHub ob
 - It is never printed, logged or written to disk. If an error message from GitHub quotes it, the CLI prints
   `[redacted]` in its place.
 - It is never given to the Claude process: that process's environment is an allow-list that names no GitHub variable
-  ([security](../security.md#what-the-model-can-do)). Whether the process's Read tool can open a file outside the
-  downloaded code — such as a token `gh` stored in a file in your home directory — has **not yet been tested** (spike
-  S1, [spec 0.2.0 §10](../specs/0.2.0-ways-in.md#10-security-for-the-new-ways-in)). Whatever it reads, everything the
+  ([security](../security.md#what-the-model-can-do)). Nor can its Read tool open a file outside the downloaded code —
+  such as a token `gh` stored in your home directory: asked to, Claude Code's tool refuses (`… is outside` its
+  working directory; tested 2026-10-15, spike S1). And whatever it reads, everything the
   model writes is scanned before it is printed or posted, and a match on a GitHub token's pattern withholds the whole
   review (exit `3`).
 - To narrow what a review can reach, use a fine-grained token limited to the one repository, with the three

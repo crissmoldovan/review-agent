@@ -26,6 +26,7 @@ The reviewed code goes to **your runner and to Anthropic, and nowhere else**.
 | Control | What it prevents |
 |---|---|
 | tools limited to **Read, Grep, Glob** | no shell, no writing files, no network |
+| `--restricted` keeps those tools inside the working directory — the checkout | the model cannot read a file elsewhere on the machine, such as a token in your home directory: asked to, Claude Code's Read tool refuses (`… is outside` its working directory). Tested 2026-10-15 |
 | `--restricted` and `--strict-mcp-config` | the reviewed repository's `.claude/settings.json` (which can define hooks — commands) and any MCP servers are not loaded |
 | an environment of `PATH`, `HOME`, `TMPDIR`, `LANG`, `USER`, `CLAUDE_CONFIG_DIR`, `USE_BUILTIN_RIPGREP` and the model credential only, plus any variable a deployment names in `passEnv` | the model cannot read the GitHub token, the App key or anything else from its own environment |
 | `passEnv` passes variables **by name**, never by value, and refuses every `ANTHROPIC_*` name, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`, every `REVIEW_AGENT_*` name, `GITHUB_TOKEN`, `GH_TOKEN` and `TRIGGER_SECRET_KEY` | a proxy or a CA bundle can reach the model's process; a credential, a token or a switch to another provider cannot |

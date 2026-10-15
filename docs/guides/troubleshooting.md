@@ -119,7 +119,7 @@ Each is exit `2`, before anything is read or spent.
 | `the check run could not be completed: …` · `the commit status could not be completed: …`, and `reported with …: it could not be completed` | the review was posted, and closing its report failed | a status left `pending` is replaced by the next review's status on that commit. A check run left `in_progress` is closed as **Review timed out** by the next review of the commit once it is an hour old, or by an App deployment's hourly sweep |
 | `the previous review’s marker could not be read; no re-review pass will run: …` | the earlier summary comment could not be read, so the earlier findings were not re-checked | the review is still posted; ask again later for the re-review |
 | `Nothing will be posted on …: this repository's settings make the review silent, so it is only printed here.` · `posted nothing: this repository's settings make the review silent` | the repository's `.review-agent/review.md` says `mode: silent` | by design: a repository may make reviews quieter ([the repository file](../configuration.md#the-repository-file)) |
-| a review on your own pull request is refused, exit `4` | whether GitHub's API accepts a review from the pull request's own author is **UNVERIFIED** (spike S4) | the review is printed; ask a colleague to post it, or post with an App or a bot |
+| a review on your own pull request is refused, exit `4` | GitHub accepts a `COMMENT` review from a pull request's own author (checked 2026-10-15, spike S4), so this is something else: read the error printed with the review | the review is printed; fix what the error names, or post with an App or a bot |
 
 ## A review that did not finish
 
