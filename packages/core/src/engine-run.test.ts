@@ -471,9 +471,16 @@ describe('the system prompt through a file', () => {
     const ac = new AbortController()
     const p = runClaude(inputFixture({ signal: ac.signal }), { platform: 'win32' })
     // The fake writes its record before it sleeps, so the file's path is known while it is running.
+    // Wait for the record to be COMPLETE, not merely to exist: under a loaded suite the file can be seen
+    // half-written, and an empty path would make `dirname` answer '.', which always exists.
+    const promptPath = (): string | undefined => {
+      try { return seen().systemPromptFile?.path } catch { return undefined }
+    }
     const deadline = Date.now() + 4000
-    while (!existsSync(record) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
-    const dir = dirname(seen().systemPromptFile?.path ?? '')
+    while (promptPath() === undefined && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
+    const path = promptPath()
+    expect(path, 'the fake recorded the prompt file it was given').toBeTypeOf('string')
+    const dir = dirname(path as string)
     expect(existsSync(dir)).toBe(true)
     ac.abort()
     await expect(p).rejects.toThrow(/abort/i)

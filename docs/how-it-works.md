@@ -8,13 +8,16 @@ the App adds the parts that post.
 1. **Check the credential.** Exactly one model credential, and no `ANTHROPIC_BASE_URL`, or the review stops here
    before any GitHub call. (The CLI lets `claude` use its own login when neither credential is set.)
 2. **Get a GitHub token.** The App mints an installation token scoped to the one repository under review. The CLI
-   uses `GITHUB_TOKEN`.
+   takes `GITHUB_TOKEN`, then `GH_TOKEN`, then the GitHub CLI's own login (`gh auth token`); the SDK takes the token
+   or client its caller passes.
 3. **Read the pull request**: its title, description, head and base commits, the diff and the changed files.
 4. **Read the repository's settings** from `.review-agent/review.md` on the **base** commit, and combine them with
    the deployment's settings and the request's flags ([configuration](configuration.md)).
 5. **Skip, or check the requester** (App only): an automatic review of a release-only pull request stops here; a
    requested review checks that the requester has push access, and stops with a `neutral` check run if not.
-6. **Open the check run** as `in_progress` (App only, unless `silent`).
+6. **Start the report on the commit**, when posting and not `silent`: a check run as `in_progress` when the token
+   can create one (the App's, or GitHub Actions'), otherwise a `pending` commit status
+   ([what each identity can post](configuration.md)). A print-only review reports nothing.
 7. **Download the code** at the head commit as an archive — not a clone, so there is no `.git`, no remote URL and no
    token in it. Credential-shaped files (`.env`, `.npmrc`, `*.pem`, `id_rsa`, `.aws/credentials`, …) are **deleted**
    before the model starts, and listed on the record. Entries that could not be written, and paths that differ only
@@ -26,8 +29,8 @@ the App adds the parts that post.
 11. **Re-check** (re-reviews only). A third process is asked whether each earlier finding is still there.
 12. **Scan for secrets.** If anything in the output matches a secret pattern, the review is withheld rather than
     posted.
-13. **Post** (App) or **print** (CLI): the summary comment, the inline comments, edits to earlier comments, and the
-    check run's conclusion. The summary and the review each open with a line saying they are automated, how the
+13. **Post** — the App, the CLI with `--post`, the SDK with `post: true` — or **print**: the summary comment, the
+    inline comments, edits to earlier comments, and the report's conclusion (a check run, or a commit status). The summary and the review each open with a line saying they are automated, how the
     review was run, the tier, the model and the cost.
 14. **Send the record** to the deployment's callback, if it set one.
 15. **Delete the checkout.** The downloaded code is removed once the review has been published (or printed), and at

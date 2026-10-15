@@ -75,7 +75,8 @@ it is judged by.
 - Everything the model wrote is **scanned for secrets** before it is posted or sent: GitHub tokens, Anthropic keys,
   npm tokens, AWS access keys, Slack tokens and private-key headers. A match **withholds** the whole review rather
   than redacting it; only the kind and location of the match are reported.
-- The reviewer posts **comments** and a **check run**. It never approves, never requests changes, never pushes.
+- The reviewer posts **comments** and reports on the commit with a **check run** (an App's or GitHub Actions' token)
+  or a **commit status** (a person's token). It never approves, never requests changes, never pushes.
 
 ## GitHub permissions
 
