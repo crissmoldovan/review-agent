@@ -1,6 +1,6 @@
 import type { Octokit } from '@octokit/core'
 import { z } from 'zod'
-import type { Finding, ReportMode, Tier } from '@review-agent/core'
+import type { DeploymentConfig, Finding, ReportMode, Tier } from '@review-agent/core'
 import { findingId } from './marker'
 
 /** design §5: "The check-run 'Re-run' button repeats the last request". GitHub sends the click
@@ -50,6 +50,16 @@ export type CheckOutcome =
 
 /** The two settings that make a gate, passed together because they are one decision. */
 export type CheckGate = { failAtOrAbove: number | null; requiresConfirmed: boolean }
+
+/** The one mapping from the two gate settings to a `CheckGate`: the setting is
+ *  `gateRequiresConfirmed` and the gate's field is `requiresConfirmed` (Criss, decisions 5 and 6).
+ *  Here, beside the gate, since 0.2.0's Stage 6: the review session and the App's runner — whose
+ *  push-access refusal is a check run the session never opens — both report through it, so the
+ *  renaming is written once and the two cannot drift apart. */
+export const gateOf = (report: DeploymentConfig['report']): CheckGate => ({
+  failAtOrAbove: report.failAtOrAbove,
+  requiresConfirmed: report.gateRequiresConfirmed,
+})
 
 /** report.ts (Task 10b) says in so many words that this decision is not its own: `silent` and
  *  `check-only` both post no comment, and whether a check run exists is the whole difference

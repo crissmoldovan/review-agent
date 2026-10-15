@@ -7,7 +7,9 @@ import {
   JWT_TTL_SECONDS,
   MAX_SCOPED_REPOSITORIES,
   REVIEW_TOKEN_PERMISSIONS,
+  type AppTransport,
   type TokenTransport,
+  appBotLogin,
   appIdentityFromEnv,
   appJwt,
   installationToken,
@@ -346,6 +348,34 @@ describe('the default transport', () => {
     expect(headers.authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/)
     expect(headers['x-github-api-version']).toBe(GITHUB_API_VERSION)
     expect(JSON.parse(String(init.body)) as unknown).toEqual({ repositories: ['widgets'] })
+  })
+})
+
+describe('appBotLogin: the login this App’s comments are posted under (spec 0.2.0 §3.3)', () => {
+  it('asks GET /app as the App, and names its bot account <slug>[bot]', async () => {
+    const transport = vi.fn<AppTransport>(async () => ({ status: 200, data: { slug: 'review-agent', id: 1 } }))
+    expect(await appBotLogin({ identity, now: NOW, transport })).toBe('review-agent[bot]')
+    // The App JWT, the same one an installation token is bought with: issued by the client id.
+    expect(parts(transport.mock.calls[0][0].jwt).claims.iss).toBe('Iv23liR3v13wAg3nt')
+  })
+
+  it('names no login it was not given in GitHub’s own form', async () => {
+    for (const data of [{}, { slug: '' }, { slug: 'x](javascript:alert(1))' }, null]) {
+      await expect(appBotLogin({ identity, now: NOW, transport: async () => ({ status: 200, data }) })).rejects.toThrow(/slug/)
+    }
+    await expect(appBotLogin({ identity, now: NOW, transport: async () => ({ status: 401, data: null }) })).rejects.toThrow(/HTTP 401/)
+  })
+
+  it('by default reads https://api.github.com/app with the pinned API version', async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ slug: 'review-agent' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    expect(await appBotLogin({ identity, now: NOW })).toBe('review-agent[bot]')
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.github.com/app')
+    expect(init.method ?? 'GET').toBe('GET')
+    const headers = init.headers as Record<string, string>
+    expect(headers.authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/)
+    expect(headers['x-github-api-version']).toBe(GITHUB_API_VERSION)
   })
 })
 

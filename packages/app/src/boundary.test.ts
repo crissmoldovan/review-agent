@@ -8,14 +8,16 @@ const SRC = fileURLToPath(new URL('.', import.meta.url))
 const CREDENTIALS = join(SRC, 'credentials.ts')
 const FIXTURES = join(SRC, '..', 'test', 'fixtures', 'boundary')
 
-/** The credential half, by name, and the ONLY two modules excused from the rule below:
- *  `credentials.ts` holds the App private key, and `index.ts` is the package entry that re-exports
- *  it on purpose. Everything else under `src` is receiver code and is enrolled by EXISTING — this
+/** The credential half, by name, and the ONLY modules excused from the rule below: `credentials.ts`
+ *  holds the App private key, `index.ts` is the package entry that re-exports it on purpose, and
+ *  `runner.ts` (since 0.2.0) is the `@review-agent/app/runner` entry — the runner's half, published
+ *  for a deployment that hosts its runner elsewhere, which mints installation tokens by design.
+ *  Everything else under `src` is receiver code and is enrolled by EXISTING — this
  *  used to be the other way round, a hand-written list of receiver modules, and a batch-3 verifier
  *  walked straight past it by adding `src/webhook.ts`, which was on nobody's list and therefore
  *  checked by nothing. A name added here is checked by the second case below, so this set cannot be
  *  used as a way out either. */
-const CREDENTIAL_HALF: ReadonlySet<string> = new Set(['credentials.ts', 'index.ts'])
+const CREDENTIAL_HALF: ReadonlySet<string> = new Set(['credentials.ts', 'index.ts', 'runner.ts'])
 
 /** The RUNNER half (Task 13), and the reason it is not receiver code: it mints the installation
  *  token, so it holds the App identity by design — that is the job design §3.1 gives it. The rule

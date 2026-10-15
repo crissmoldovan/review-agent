@@ -14,7 +14,7 @@ import { decodeMarker, encodeMarker, findingId, type MarkerState } from './marke
 import type { PullRequestContext } from './pr'
 import { MULTI_REFUSED } from './refusals'
 import { checkRunReporter, commitStatusReporter, type Reporter } from './reporter'
-import type { ReviewAsk, RunReviewDeps } from './run-review'
+import type { FocusRunsOutcome, ReviewAsk, RunReviewDeps } from './run-review'
 import {
   failureSentence, mayRetry, postedCommentsOf, prepareReview, runReviewSession, saidSafely,
   type PreparedReview, type SessionDeps, type SessionResult,
@@ -676,6 +676,89 @@ describe('runReviewSession: the multi-reviewer mode (spec 0.2.0 §8.3)', () => {
     // Two ran side by side and both got the stop; the third was never started.
     expect(seen).toHaveLength(2)
     expect(seen.every((i) => i.signal?.aborted === true)).toBe(true)
+  })
+})
+
+describe('runReviewSession: focuses run elsewhere (spec 0.2.0 §8.3 point 4)', () => {
+  const ran = (lens: 'intent' | 'impact' | 'security', result: EngineResult = RESULT) => ({ lens, result })
+  const runFocuses = (over: { throws?: Error } = {}) =>
+    vi.fn(async (): Promise<FocusRunsOutcome> => {
+      if (over.throws !== undefined) throw over.throws
+      return { runs: [ran('intent'), ran('impact'), ran('security')], withheld: [] }
+    })
+
+  it('publishes one review from focuses another runner ran, and counts what they cost', async () => {
+    const gh = fakeGitHub()
+    const { result, deps } = await session({ gh, reporter: checkRunReporter(), ask: { multi: true }, deps: { runFocuses: runFocuses() } })
+    const r = expectKind(result, 'reviewed')
+    expect(deps.runEngine).not.toHaveBeenCalled()
+    expect(r.record.costUsd).toBeCloseTo(USAGE.costUsd * 3 + CHECK_USAGE.costUsd, 6)
+    expect(only(gh.calls, REVIEW_CREATE)).toHaveLength(1)
+  })
+
+  it('never calls a failure after those focuses free: it knows what they spent, and does not offer a retry', async () => {
+    // The check pass dies after three focuses elsewhere were paid for. Without the watch on the
+    // runner, nothing here would have seen the engine start, and the failure would read as a $0 one
+    // that a second run could fix — the whole review bought again.
+    const gh = fakeGitHub()
+    const { result } = await session({
+      gh, reporter: checkRunReporter(), ask: { multi: true },
+      deps: { runFocuses: runFocuses(), runCheckPass: vi.fn(async () => { throw new Error('spawn EAGAIN') }) },
+    })
+    const f = expectKind(result, 'failed')
+    expect(f).toMatchObject({ stage: 'model', engineStarted: true, retryable: false })
+    expect(f.spentUsd).toBeCloseTo(USAGE.costUsd * 3, 6)
+  })
+
+  it('does not offer a retry when none of the focuses could run, because what they spent is not known', async () => {
+    const gh = fakeGitHub()
+    const { result } = await session({
+      gh, reporter: checkRunReporter(), ask: { multi: true },
+      deps: { runFocuses: runFocuses({ throws: new Error('none of the three tasks ran') }) },
+    })
+    expect(expectKind(result, 'failed')).toMatchObject({ stage: 'model', engineStarted: true, retryable: false })
+  })
+})
+
+describe('runReviewSession: the caller hears the review before it is published (onReviewed)', () => {
+  it('hands over the review once it has run, before anything about it is written', async () => {
+    const gh = fakeGitHub()
+    let writtenBefore = -1
+    const onReviewed = vi.fn(() => { writtenBefore = gh.calls.filter((c) => c.route !== LIST_RUNS && c.route !== CREATE_RUN && c.route !== SUMMARY_LIST).length })
+    const { result } = await session({ gh, reporter: checkRunReporter(), extra: { onReviewed } })
+    const r = expectKind(result, 'reviewed')
+    expect(onReviewed).toHaveBeenCalledTimes(1)
+    expect(onReviewed.mock.calls[0]).toEqual([r.review])
+    // Opened the report and read the marker, and posted nothing yet.
+    expect(writtenBefore).toBe(0)
+  })
+
+  it('hears a review that produced nothing too, so its cost is recorded', async () => {
+    const onReviewed = vi.fn()
+    const { result } = await session({
+      gh: fakeGitHub(), reporter: checkRunReporter(),
+      deps: { runEngine: vi.fn(async () => ({ ...RESULT, output: null, failure: { kind: 'refusal' as const } })) },
+      extra: { onReviewed },
+    })
+    expectKind(result, 'unfinished')
+    expect(onReviewed).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a throw from it as a failure after the money was spent: the report says so, nothing is posted, no retry', async () => {
+    const gh = fakeGitHub()
+    const { result, deps } = await session({
+      gh, reporter: checkRunReporter(),
+      extra: { onReviewed: () => { throw new Error(`the metric sink refused the batch for ${LEAKED_TOKEN}`) } },
+    })
+    const f = expectKind(result, 'failed')
+    expect(f).toMatchObject({ stage: 'model', engineStarted: true, retryable: false })
+    expect(f.spentUsd).toBeCloseTo(USAGE.costUsd + CHECK_USAGE.costUsd, 6)
+    expect(f.reason).toBe('its text is withheld because it matched a secret pattern')
+    expect(only(gh.calls, REVIEW_CREATE)).toEqual([])
+    expect(checkRunSummary(gh.calls)).toContain('withheld')
+    // The checkout is still removed.
+    const dir = await vi.mocked(deps.makeCheckoutDir).mock.results[0].value as string
+    expect(existsSync(dir)).toBe(false)
   })
 })
 

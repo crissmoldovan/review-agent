@@ -131,9 +131,13 @@ either. A review by one reviewer is never asked this: its check pass runs the sa
 2. **Each with the tier's budget.** Every reviewer gets the tier's soft budget and its own `--max-budget-usd` ceiling,
    so the three may spend up to three times the tier's ceiling between them. One stopped by its ceiling keeps what it
    had written; the others go on.
-3. **Side by side, or one at a time.** Up to three at once in the CLI and the library; one at a time in the App's
-   runner, whose machine does not fit three. A stop — Ctrl-C, the deadline, a cancelled run — kills every reviewer
-   that is running and starts none that is waiting.
+3. **Side by side, or each on a machine of its own.** Up to three at once in the CLI, the library and an in-process
+   runner. The App's runner on trigger.dev, whose 1 GB machine does not fit three, starts **one child task per focus**
+   (`review-agent-focus`) and waits for all three — checkpointed, and not billed while it waits. Each child mints its
+   own token for the one repository, downloads the same commit, runs its one reviewer, and hands back what it said;
+   it posts nothing. The review then downloads the commit itself for the check pass. A stop — Ctrl-C, the deadline, a
+   cancelled run — kills every reviewer running in the same process and starts none that is waiting; a child task
+   has its own deadline, 20 minutes, inside the review's 30.
 4. **One failing does not fail the review.** A reviewer that crashes or answers nothing is recorded and named, and
    the review goes on with the others. Only when none of the three produced anything is the review unfinished.
 5. **Combined.** Their findings are put together, each tagged with its focus; the summary and the intent verdict are

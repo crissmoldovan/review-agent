@@ -8,14 +8,15 @@ released together at the same version.
 | [`@review-agent/sdk`](#review-agentsdk) | the review as one call from your own code: `reviewPullRequest()` — see [the SDK](sdk.md) | `core`, `github` |
 | [`@review-agent/core`](#review-agentcore) | the engine: settings, prompts, running Claude Code, findings, the check and re-check passes, the record, the secret scan | nothing GitHub-specific |
 | [`@review-agent/github`](#review-agentgithub) | GitHub: read a pull request, download the code, decide what to post, post it, keep the re-review marker | `core` |
-| [`@review-agent/app`](#review-agentapp) | the GitHub App: manifest, credentials, and the [receiver](#the-receiver) (`@review-agent/app/receiver`) | `core`, `github` |
+| [`@review-agent/app`](#review-agentapp) | the GitHub App: manifest, credentials, the [receiver](#the-receiver) (`@review-agent/app/receiver`) and the [runner](#review-agentapprunner) (`@review-agent/app/runner`) | `core`, `github` |
 | `@review-agent/cli` | the `review-agent` command — see [the CLI](cli.md) | `app`, `core`, `github` |
 
 Each package ships compiled JavaScript with type declarations (`dist/`), and no source maps. The packages pin each
 other exactly: `@review-agent/github@0.1.3` requires `@review-agent/core@0.1.3`.
 
 The trigger.dev tasks are **not** in the published packages; they are deployed from this repository
-([deploying](deploying.md#5-deploy-the-runner)).
+([deploying](deploying.md#5-deploy-the-runner)). The review they run is, for other hosting:
+[`@review-agent/app/runner`](#review-agentapprunner).
 
 ## `@review-agent/sdk`
 
@@ -109,6 +110,7 @@ The package root adds the App's identity and registration, which **must not** be
 |---|---|
 | `appIdentityFromEnv(env)` | reads `REVIEW_AGENT_APP_CLIENT_ID` and `REVIEW_AGENT_APP_PRIVATE_KEY`; throws naming a missing variable, never printing a value |
 | `appJwt({ identity, now? })` | the App JWT (RS256, issued by the client id) |
+| `appBotLogin({ identity, now?, transport? })` | the login the App's comments are posted under, `<slug>[bot]`, from `GET /app` (the `[bot]` form is **UNVERIFIED** against GitHub; a wrong one only matches nothing) |
 | `installationToken({ identity, installationId, repositories, permissions?, now?, transport? })` | a token for an installation, scoped to 1–500 named repositories, optionally narrowed in permissions |
 | `normalisePrivateKeyPem(pem)` | repairs a private key whose line breaks were flattened or escaped |
 | `APP_IDENTITY_VARS`, `GITHUB_API_VERSION`, `REVIEW_TOKEN_PERMISSIONS`, `MAX_SCOPED_REPOSITORIES` | constants (`GITHUB_API_VERSION` is `@review-agent/github`'s, re-exported) |
@@ -116,18 +118,37 @@ The package root adds the App's identity and registration, which **must not** be
 | `convertManifest(…)`, `readConversion(…)`, `ManifestConversionError` | exchange the manifest flow's code for the App, keeping only non-secret fields |
 | `secret(value)`, `REDACTED` | a wrapper whose `toString` and `toJSON` print `[redacted]` |
 
+### `@review-agent/app/runner`
+
+```ts
+import { runReviewJob, DoNotRetry, RetryThis } from '@review-agent/app/runner'
+```
+
+The App's review in your own process, for a runner hosted somewhere other than trigger.dev: the code the
+`review-agent-review` task runs. It holds the App's identity, so it is the runner's half and never the receiver's, and
+it never loads `@trigger.dev/sdk`. How to host it: [deploying](deploying.md#running-the-review-without-triggerdev).
+
+| Export | What it is |
+|---|---|
+| `runReviewJob({ identity, installationId, request, deployment?, signal?, log?, focusConcurrency? }) → Promise<ReviewTaskResult>` | one review: a token for the one repository, the release-only skip, the push-access gate for a requested review, then the [review session](#the-review-session) with a check run. Returns `reviewed`, `skipped` or `refused`; throws `DoNotRetry` (do not run it again: the model may have been paid, or it cannot help), `RetryThis` (a crash at $0) or another error (nothing was spent). `focusConcurrency`: how many focuses of a multi-reviewer review run side by side here (3) |
+| `ReviewTaskResult` | what it returns — and what the record callback's `result` is |
+| `DoNotRetry` (with `spentUsd`), `RetryThis` | the two verdicts on the money it throws |
+| `runnerDeployment()`, `runnerRecordCallback(env?)` | the built-in deployment it reviews under when you pass none, and the record callback the environment names |
+| `DEFAULT_DEADLINE_MS` | 30 minutes, its deadline |
+| `AppIdentity` | the type `appIdentityFromEnv` returns |
+
 ## `@review-agent/github`
 
 | Area | Main exports |
 |---|---|
-| The review session | `prepareReview(…)` and `runReviewSession(…)` — a whole review, the same whichever way in asked for it; see [the review session](#the-review-session). `SessionResult` (`reviewed` \| `unfinished` \| `failed`), `PreparedReview`, `SessionDeps`, `DEFAULT_SESSION_DEADLINE_MS`; the rules it shares with the App's runner: `mayRetry(record)`, `failureSentence(record)`, `saidSafely(text)`, `postedCommentsOf(published)` |
-| Reporting on the commit | `reporterFor({ octokit, want, identity?, onStarted? })` — `'auto'` \| `'check-run'` \| `'commit-status'` \| `'none'`; `checkRunReporter`, `commitStatusReporter`, `noReporter`; `tokenIdentityOf(octokit)`; `statusFor(…)`, `MAX_STATUS_DESCRIPTION_CHARS` |
+| The review session | `prepareReview(…)` and `runReviewSession(…)` — a whole review, the same whichever way in asked for it; see [the review session](#the-review-session). `SessionResult` (`reviewed` \| `unfinished` \| `failed`), `PreparedReview`, `SessionDeps`, `DEFAULT_SESSION_DEADLINE_MS`; the rules it shares with the App's runner: `mayRetry(record)`, `failureSentence(record)`, `saidSafely(text)`, `postedCommentsOf(published)`. `runReviewSession`'s `onReviewed(review)` hears the review before anything is published — where the App's runner records its metrics |
+| Reporting on the commit | `reporterFor({ octokit, want, identity?, onStarted? })` — `'auto'` \| `'check-run'` \| `'commit-status'` \| `'none'`; `checkRunReporter({ onStarted?, statusIfRefused?, calls? })` (`calls`: the create and complete functions, for a caller's own tests), `commitStatusReporter`, `noReporter`; `tokenIdentityOf(octokit)`; `statusFor(…)`, `MAX_STATUS_DESCRIPTION_CHARS` |
 | Clients and gates | `octokitFor({ token, baseUrl?, fetch? })` — a client with the API version pinned, `baseUrl` for GitHub Enterprise Server; `GITHUB_API_VERSION`; `pushAccessOf({ octokit, owner, repo, username })`; `refuseUnbuilt(request, { allowMulti?, automatic? })` — drops and names a `multi` the deployment switched off (`MULTI_REFUSED`) or an automatic review carried (`MULTI_REFUSED_AUTOMATIC`) |
-| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with. `defaultRunReviewDeps({ note, workDir?, skillCacheDir?, concurrency? })` — its real collaborators, as the CLI and the App's runner wire them; `concurrency` is how many focused reviewers of a [multi-reviewer review](configuration.md#the-multi-reviewer-mode) run at once (3; the App's runner says 1) |
+| Running a review | `runReview({ octokit, owner, repo, number, deployment, ask, previousFindings?, signal?, runtime?, deps })` — read the pull request, download, review, check, re-check; **posts nothing**. `runtime` is the [credential and binary](#passing-a-credential) every model pass of this review runs with. `defaultRunReviewDeps({ note, workDir?, skillCacheDir?, concurrency? })` — its real collaborators, as the CLI and the App's runner wire them; `concurrency` is how many focused reviewers of a [multi-reviewer review](configuration.md#the-multi-reviewer-mode) run at once (3). `RunReviewDeps.runFocuses`, a `FocusRunner`, runs them somewhere else instead — the App's runner on trigger.dev passes one that starts a child task per focus — and is asked before anything is downloaded; `withRepositoryPaths(output, checkoutDir)` is the path rule such a runner applies to its own checkout |
 | Posting it | `publishReview({ …, via, selfLogin?, ignoreRepliesFrom? })` — the summary, inline comments, edits to earlier comments and the marker. `via` is how the review ran, which the first line of every body says |
 | Reading GitHub | `fetchPullRequest`, `downloadArchive` (with `sanitiseCheckout`, `isCredentialPath` and `pathCollisions`; it also returns the entries it could not write), `fetchRepoConfig` / `parseRepoConfig` / `REPO_CONFIG_PATH`, `fetchThreadReplies` |
 | Deciding what to say | `anchorFindings`, `selectForPosting`, `duplicatesIn(check)` — the findings a multi-reviewer review's check pass marked as repeating an earlier one |
-| The check run | `createCheckRun`, `completeCheckRun`, `closeCheckRunIfInProgress`, `closeStaleCheckRuns`, `conclusionFor`, `checkRunOutput`, `annotationsFor`, `RERUN_ACTION` |
+| The check run | `createCheckRun`, `completeCheckRun`, `closeCheckRunIfInProgress`, `closeStaleCheckRuns`, `conclusionFor`, `gateOf(report)`, `checkRunOutput`, `annotationsFor`, `RERUN_ACTION` |
 | The marker | `encodeMarker`, `decodeMarker`, `findSummaryComment`, `upsertSummaryComment`, `recheckQuestions`, `nextMarkerState`, `applyOutcomes` |
 | Findings and replies | `findingId(finding)` — a 12-hex-character address for one finding in one run (a hash of file, category and title); `declaredOutcome(body)` — `'disputed'`, `'deferred'` or `null` for a reply |
 | Comment bodies | `summaryBody`, `inlineBody`, `reviewBody`, `retractionNote`, `reinstatementNote`, `automatedReviewLine`, `focusLine`, `ReviewVia`, `PRODUCT_URL` |

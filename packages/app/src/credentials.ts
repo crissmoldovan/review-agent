@@ -198,6 +198,54 @@ export async function installationToken(a: {
   }
 }
 
+export type AppTransport = (a: { jwt: string }) => Promise<{ status: number; data: unknown }>
+
+/** A slug as GitHub writes one: letters, digits and hyphens. Anything else is not used as a login. */
+const AppResponse = z.object({ slug: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]*$/) })
+
+const githubAppTransport: AppTransport = async ({ jwt }) => {
+  const res = await fetch('https://api.github.com/app', {
+    headers: {
+      authorization: `Bearer ${jwt}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': GITHUB_API_VERSION,
+      'user-agent': 'review-agent',
+    },
+  })
+  const text = await res.text()
+  let data: unknown = null
+  try {
+    data = text === '' ? null : JSON.parse(text)
+  } catch {
+    data = null
+  }
+  return { status: res.status, data }
+}
+
+/** The login this App's own comments are posted under: `<slug>[bot]`, from `GET /app` with the App
+ *  JWT — one read, and the same JWT the installation token is bought with (spec 0.2.0 §3.3, decisions
+ *  §14.6 and §14.7). The runner passes it to the review session, which then prefers the summary
+ *  comment this App wrote over one a person posted with the CLI, and does not read this App's own
+ *  replies as a person's answer.
+ *
+ *  UNVERIFIED by a live call while this was written (2026-10-15): that GitHub names an App's bot
+ *  account `<slug>[bot]` (the research of 2026-09-14 did not find it in GitHub's documentation). If
+ *  it does not, the login matches no comment, and both uses fall back to exactly what they do without
+ *  one — any summary carrying the marker, and every reply read — so a wrong guess costs nothing. */
+export async function appBotLogin(a: {
+  identity: AppIdentity
+  now?: number
+  transport?: AppTransport
+}): Promise<string> {
+  const { status, data } = await (a.transport ?? githubAppTransport)({
+    jwt: appJwt({ identity: a.identity, ...(a.now !== undefined && { now: a.now }) }),
+  })
+  if (status !== 200) throw new Error(`GitHub would not describe the App: HTTP ${status}`)
+  const parsed = AppResponse.safeParse(data)
+  if (!parsed.success) throw new Error('GitHub described the App without a usable slug')
+  return `${parsed.data.slug}[bot]`
+}
+
 /** The two variables a deployment sets so the runner can mint tokens. Named once, here, beside the
  *  only code that touches the key: the internet-facing half never holds it (plan 2's Global
  *  Constraints), and Task 8's import-graph test enforces that.

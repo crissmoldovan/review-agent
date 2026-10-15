@@ -1,7 +1,7 @@
 import type { Octokit } from '@octokit/core'
 import { describe, expect, it } from 'vitest'
-import type { Finding, ReportMode } from '@review-agent/core'
-import { conclusionFor, checkRunWanted, type CheckGate, type CheckOutcome } from './check-run'
+import { defaultDeploymentConfig, type Finding, type ReportMode } from '@review-agent/core'
+import { conclusionFor, checkRunWanted, gateOf, type CheckGate, type CheckOutcome } from './check-run'
 
 const finding = (severity: number): Finding => ({
   file: 'src/token.ts', line: 42, endLine: null, severity, category: 'security',
@@ -86,6 +86,14 @@ describe('conclusionFor', () => {
     const gate = { failAtOrAbove: 9, requiresConfirmed: false }
     expect(conclusionFor({ outcome: reviewed([finding(9)], { cutShort: true }), gate })).toBe('failure')
     expect(conclusionFor({ outcome: reviewed([finding(4)], { cutShort: true }), gate })).toBe('success')
+  })
+})
+
+describe('gateOf', () => {
+  it('carries both halves of the gate, under the names the check run reads (Criss, decisions 5 and 6)', () => {
+    const report = { ...defaultDeploymentConfig().report, failAtOrAbove: 9, gateRequiresConfirmed: true }
+    expect(gateOf(report)).toEqual({ failAtOrAbove: 9, requiresConfirmed: true })
+    expect(gateOf(defaultDeploymentConfig().report)).toEqual({ failAtOrAbove: null, requiresConfirmed: false })
   })
 })
 

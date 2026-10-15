@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url'
 import { defaultDeploymentConfig } from '@review-agent/core'
 import * as github from '@review-agent/github'
 import { describe, expect, it } from 'vitest'
-import { GITHUB_API_VERSION } from '../credentials'
+import { GITHUB_API_VERSION, installationToken } from '../credentials'
 import { sendRecordCallback } from './record-callback'
 import {
-  liveReviewTaskDeps, liveRunReviewDeps, octokitFor, pushAccessOf, runnerDeployment,
+  liveFocusTaskDeps, liveReviewTaskDeps, liveRunReviewDeps, octokitFor, pushAccessOf, runnerDeployment,
   runnerRecordCallback, runnerSweepTargets,
 } from './review-job'
+import { FOCUS_DEADLINE_MS } from './focus-run'
+import { DEFAULT_DEADLINE_MS } from './review-run'
 
 describe('the collaborators the deployed task actually uses', () => {
   it('pins the GitHub API version on every request, in the one place the client is built', async () => {
@@ -45,9 +47,26 @@ describe('the collaborators the deployed task actually uses', () => {
   })
 
   // Spec 0.2.0 §8.3 point 4: one review peaks around 400 MiB, and three Claude processes side by side
-  // do not fit the runner's 1 GB machine. One focus at a time until each runs as a child task (Stage 6).
-  it('runs the focused reviewers of a multi-reviewer review one at a time', () => {
-    expect(liveRunReviewDeps({ note: () => undefined }).concurrency).toBe(1)
+  // do not fit the runner's 1 GB machine. Until Stage 6 the runner ran its focuses one at a time; now
+  // the deployed task runs each as a child task (`runFocuses`), and only a review run in process
+  // runs them here — side by side unless the host says fewer.
+  it('runs a multi-reviewer review’s focuses where it is told: as child tasks, or here, as many at once as the host allows', () => {
+    const runFocuses = async () => ({ runs: [], withheld: [] })
+    expect(liveRunReviewDeps({ note: () => undefined, runFocuses }).runFocuses).toBe(runFocuses)
+    expect(liveRunReviewDeps({ note: () => undefined }).runFocuses).toBeUndefined()
+    expect(liveRunReviewDeps({ note: () => undefined }).concurrency).toBe(3)
+    expect(liveRunReviewDeps({ note: () => undefined, focusConcurrency: 1 }).concurrency).toBe(1)
+    // Handed down from the task's own collaborators, so the deployed task's choice reaches runReview.
+    const live = liveReviewTaskDeps({
+      identity: () => { throw new Error('not read by this test') },
+      log: () => undefined, metric: () => undefined, startAnotherRun: null, checkRunMemory: null, runFocuses,
+    })
+    expect(live.runReviewDeps.runFocuses).toBe(runFocuses)
+    // In process, the host's say on how many run at once reaches runReview the same way.
+    expect(liveReviewTaskDeps({
+      identity: () => { throw new Error('not read by this test') },
+      log: () => undefined, metric: () => undefined, startAnotherRun: null, checkRunMemory: null, focusConcurrency: 1,
+    }).runReviewDeps.concurrency).toBe(1)
   })
 
   // Spec 0.2.0 §9.3 P13. One `review-agent-skills` for every account on a machine let any of them plant
@@ -116,6 +135,40 @@ describe('the collaborators the deployed task actually uses', () => {
     const source = readFileSync(fileURLToPath(new URL('./review-job.ts', import.meta.url)), 'utf8')
     expect(source).toMatch(/startAnotherRun: null\b/)
     expect(source).not.toMatch(/sdkTriggerPort/)
+  })
+})
+
+describe('a focus child and the review that started it (spec 0.2.0 §8.3 point 4)', () => {
+  it('runs with the same collaborators and the same deployment as its review, so it resolves the same settings', () => {
+    const f = liveFocusTaskDeps({ identity: () => { throw new Error('not read by this test') }, log: () => undefined })
+    expect(f.deployment).toBe(runnerDeployment)
+    expect(f.installationToken).toBe(installationToken)
+    expect(f.fetchPullRequest).toBe(github.fetchPullRequest)
+    expect(f.fetchRepoConfig).toBe(github.fetchRepoConfig)
+    // Inside the review's own deadline, so the review has time to check and post what its focuses found.
+    expect(f.deadlineMs).toBe(FOCUS_DEADLINE_MS)
+    expect(FOCUS_DEADLINE_MS).toBeLessThan(DEFAULT_DEADLINE_MS)
+    const shared = github.defaultRunReviewDeps({ note: () => undefined })
+    for (const k of ['downloadArchive', 'materialiseSkills', 'runEngine'] as const) {
+      expect(f.runReviewDeps[k]).toBe(shared[k])
+    }
+    // The runner's own per-user skill cache, not the CLI's.
+    expect(f.runReviewDeps.skillCacheDir()).toBe(liveRunReviewDeps({ note: () => undefined }).skillCacheDir())
+  })
+
+  it('starts no child task from a review run in process, where nothing could run one', () => {
+    // runReviewJob on other hosting runs its focuses itself (`focusConcurrency`); the child task and
+    // the call that starts one live in focus-task.ts, which imports @trigger.dev/sdk.
+    const source = readFileSync(fileURLToPath(new URL('./review-job.ts', import.meta.url)), 'utf8')
+    expect(source).not.toMatch(/sdkFocusBatch|focusesAsChildTasks/)
+  })
+
+  it('asks GitHub for the App’s own login on the deployed task’s behalf', () => {
+    const live = liveReviewTaskDeps({
+      identity: () => { throw new Error('not read by this test') },
+      log: () => undefined, metric: () => undefined, startAnotherRun: null, checkRunMemory: null,
+    })
+    expect(typeof live.appLogin).toBe('function')
   })
 })
 

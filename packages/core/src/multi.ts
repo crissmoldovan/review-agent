@@ -9,8 +9,10 @@ import { REVIEW_LENSES, reviewSystemPrompt, type Lens } from './prompt'
 //
 // What lives here is the part every way in shares: running the focuses side by side, and combining
 // what they said into one engine result. Running a focus is somebody else's function (`run`), so the
-// review session can watch each one's spend from outside, and trigger.dev's runner can later run each
-// focus as a child task of its own (§8.3 point 4, decision §14.18 — Stage 6) without this file changing.
+// review session can watch each one's spend from outside; and trigger.dev's runner runs each focus as
+// a child task of its own instead (§8.3 point 4, decision §14.18 (a); `FocusRunner` in
+// `@review-agent/github`), which this file did not have to change for: what comes back is a `FocusRun`
+// either way, and it is combined here.
 
 /** One focused reviewer, as it ended. */
 export type FocusRun = { lens: Lens; result: EngineResult }
@@ -31,8 +33,9 @@ export type FocusRecord = {
 }
 
 /** How many focuses run at once when the caller does not say: all three. On a laptop, CI or a VPS
- *  they are three processes side by side (spec 0.2.0 §8.3 point 4). The App's runner says 1: one
- *  review peaks around 400 MiB and its machine has 1 GB. */
+ *  they are three processes side by side (spec 0.2.0 §8.3 point 4); one review peaks around 400 MiB,
+ *  so a host with 1 GB says 1. The App's runner on trigger.dev runs none here: each focus is a child
+ *  task on a machine of its own. */
 export const DEFAULT_FOCUS_CONCURRENCY = REVIEW_LENSES.length
 
 const emptyUsage = (): Usage => ({

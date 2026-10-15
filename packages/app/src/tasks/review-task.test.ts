@@ -34,6 +34,14 @@ describe('the task definition', () => {
     expect(source).not.toMatch(/\bretry\s*:/)
   })
 
+  it('runs a multi-reviewer review’s focuses as child tasks of this run (spec 0.2.0 §8.3 point 4)', () => {
+    // Decision §14.18 (a): three Claude processes do not fit this task's 1 GB machine, so each focus
+    // is a `review-agent-focus` run on a machine of its own, started together and waited for.
+    expect(source).toMatch(/runFocuses: focusesAsChildTasks\(\{/)
+    expect(source).toMatch(/installationId: payload\.installationId/)
+    expect(source).toMatch(/batch: sdkFocusBatch\b/)
+  })
+
   it('reports the machine peak memory on every run, so the one hosted run answers criterion 5', () => {
     // Criss, 2026-09-14 (decision 12): Task 15's hosted run is also Task 12's in-image memory
     // measurement. The number has to leave the run, and this is the only file that runs there.

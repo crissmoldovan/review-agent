@@ -89,7 +89,8 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
   `allowMulti` (default `true`): `false` refuses `--multi` under *Not honoured* and runs one reviewer. `MULTI_REFUSED`
   is now that sentence; `MULTI_REFUSED_AUTOMATIC` is new. `refuseUnbuilt` takes `{ allowMulti, automatic }`.
 - **How many run at once:** `defaultRunReviewDeps({ concurrency })`, 3 by default. The App's runner runs them one at
-  a time, because three Claude processes do not fit its 1 GB machine; a child task per reviewer comes later in 0.2.0.
+  a time, because three Claude processes do not fit its 1 GB machine; a child task per reviewer comes later in 0.2.0
+  (Stage 6, below, replaced the one-at-a-time runner).
   The CLI has no `--multi` flag yet.
 - **A multi-reviewer re-review** fits its re-review pass under the three reviewers' ceilings together, not one.
 
@@ -142,6 +143,44 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
   key; **`onProgress`**, stage by stage; **`signal`** and **`deadlineMs`**; `multi: { concurrency }`.
 - Concurrent reviews in one process share nothing but the skill cache, and every checkout is removed when its review
   ends. The SDK does not depend on `@review-agent/app`, so it never installs trigger.dev.
+
+### Stage 6 — the App on the review session
+
+- **The App's runner runs the review session** (`prepareReview`, `runReviewSession` with a check-run reporter), so the
+  App, the CLI and the SDK review identically. What stays the runner's own: the token for one repository, the
+  release-only skip, the push-access gate (still a neutral *Review refused* check run, at $0), closing the check run a
+  killed attempt left open, trigger.dev's attempts and the new run a free failure starts. Everything a deployment sees
+  is unchanged — task ids, payload, variables, check-run name, titles and conclusions, the record callback
+  (`version: 1`), idempotency keys and retries — with two additions: the check run now links the summary comment, and
+  the runner reads the App's own login (`GET /app`, `<slug>[bot]` — the `[bot]` form is **UNVERIFIED** against
+  GitHub, and a wrong one matches nothing), so it edits its own summary comment rather than one a person posted with
+  the CLI, and skips its own replies.
+- **Multi-reviewer reviews run each focus as a child task** — a new task, `review-agent-focus`, one run per focus, all
+  three started together with `batchTriggerAndWait`, each on its own `small-2x` machine (decision §14.18 (a)). The
+  review waits, checkpointed, then runs one check pass over their findings and posts one review. A focus mints its
+  own token, downloads the commit the review is of, and resolves its settings itself from the deployment, the base
+  commit's settings file and the request — its payload carries ids and what was asked, never settings. Each child is
+  keyed on the review's run, its focus and the commit. A focus that fails before its reviewer starts is retried by
+  trigger.dev; one whose reviewer ran is never run again; one that fails every attempt is named as not finished and
+  the review goes on (§8.3 point 2). A focus whose answer matched a secret pattern hands back where, never what, and
+  the review is withheld as one run in a single process would be. The runner no longer runs focuses one at a time
+  (`RUNNER_FOCUS_CONCURRENCY` is gone).
+- **`@review-agent/app/runner`**: `runReviewJob` — the review the task runs, in your own process, for a runner hosted
+  elsewhere — published with `DoNotRetry`, `RetryThis`, `ReviewTaskResult`, `runnerDeployment`,
+  `runnerRecordCallback` and `DEFAULT_DEADLINE_MS`. It never loads `@trigger.dev/sdk`. New `focusConcurrency` option:
+  in process, a multi-reviewer review's focuses run side by side, 3 at a time unless you say fewer.
+- **Library:** `RunReviewDeps.runFocuses` (a `FocusRunner` returning `FocusRunsOutcome`) runs a multi-reviewer
+  review's focuses elsewhere, asked before anything is downloaded; `withRepositoryPaths` is exported for such a
+  runner. `runReviewSession` takes `onReviewed`, which hears the review before anything is published.
+  `checkRunReporter` takes `calls` (its create and complete functions). `gateOf` moved to `check-run`, exported.
+  `@review-agent/app` exports `appBotLogin`.
+
+### Upgrading an App deployment to 0.2.0
+
+Redeploy the runner (`npx trigger.dev@4.5.16 deploy`). Nothing to reconfigure: the variables, the receiver, its
+trigger key and the record callback are as they were. The new `review-agent-focus` task registers itself with the
+deploy, and only the runner starts it. A deployment that edited `runnerDeployment()` re-applies that edit, as on
+every upgrade.
 
 ### Stage 8 — continuous integration
 

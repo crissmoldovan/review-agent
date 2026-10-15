@@ -172,11 +172,12 @@ npx trigger.dev@4.5.16 login                                   # once
 TRIGGER_PROJECT_REF=proj_xxxxxxxxxxxxxxxxxxxx npx trigger.dev@4.5.16 deploy --env prod
 ```
 
-The deploy builds an image that includes Claude Code `2.1.258` (pinned) and registers three tasks:
+The deploy builds an image that includes Claude Code `2.1.258` (pinned) and registers four tasks:
 
 | Task | When it runs | What it does |
 |---|---|---|
 | `review-agent-review` | when the receiver triggers it | one review, end to end |
+| `review-agent-focus` | when a [multi-reviewer review](#multi-reviewer-reviews) starts it — one run per focus | one focused reviewer, on a machine of its own; it posts nothing, and hands what it found back to the review that started it |
 | `review-agent-sweep-stale-check-runs` | every hour, on the hour (UTC) | closes abandoned check runs — see [the sweep](#the-hourly-sweep) |
 | `probe-claude` | only when you start it by hand | reports whether the Claude binary runs in the image and which credential **names** are present (never values) |
 
@@ -214,6 +215,27 @@ Then install it on more repositories, telling the people who work there first.
 
 A review that dies **after** the model has spent can therefore be paid for up to three times. A review that fails
 after spending is otherwise never repeated automatically.
+
+### Multi-reviewer reviews
+
+A `/review --multi` ([the multi-reviewer mode](configuration.md#the-multi-reviewer-mode)) runs three focused reviewers.
+One review was measured at roughly 300 to 400 MiB of memory — 293.8 MiB in this image on a one-file pull request
+(2026-09-15), 388 MiB on macOS — so three side by side do not fit the runner's 1 GB machine. The runner starts **one
+`review-agent-focus` child task per focus** instead, all three at once (`batchTriggerAndWait`), each on its own
+`small-2x` machine, and waits:
+
+| | |
+|---|---|
+| The review while it waits | checkpointed by trigger.dev, which documents that a waiting run holds no concurrency slot and is not billed for the wait (not measured here) |
+| Each focus | mints its own token for the one repository, downloads the commit the review is of, runs one reviewer with the tier's whole budget, deletes its checkout, and hands back what it found. It resolves its settings from the same deployment, settings file and request as the review — a focus payload carries ids and what was asked, never settings |
+| After all three answer | the review downloads the commit itself, runs **one** check pass over everything the focuses found, and posts one review, as a single reviewer's would be |
+| A focus that fails | before its reviewer starts — GitHub, the download — trigger.dev retries it (3 attempts, the project's). Once its reviewer has run, it is never run again. A focus that fails every attempt is named in the summary as not finished, and the review goes on without it; only when none of the three answered is the review unfinished |
+| A focus's own deadline | 20 minutes — inside the review's 30, so the review has time left to check and post what its focuses found |
+| Idempotency | each child is keyed on the review's run, its focus and the commit: a retried attempt of the review gets back the children it already started, and does not pay for a focus that already answered |
+| Cost | roughly three reviews plus one check pass, as model spend at per-token API prices (not measured on this release), plus three child runs' compute on trigger.dev (its usage price; not measured either) |
+
+If someone pushes while the focuses are queued, a focus refuses to review the new commit — its run says *the pull
+request moved on* — because the review it belongs to is of the old one.
 
 ## The review record callback
 
@@ -281,16 +303,46 @@ makes the sweep run fail visibly rather than sweep nothing.
 
 ## Running the review without trigger.dev
 
-`runReviewJob` in `packages/app/src/tasks/review-job.ts` runs the same review in-process, with no trigger.dev
-runtime: it is the code the task runs. To host the runner elsewhere, call it from your own job system with the App
-identity, the installation id and the request. It is not part of the published packages in this release, so it is
-used from a clone of this repository.
+`@review-agent/app/runner` exports `runReviewJob`: the review the `review-agent-review` task runs — the App token for
+one repository, the release-only skip, the push-access gate, the check run — in your own process, from your own job
+system. It never loads `@trigger.dev/sdk`.
+
+```ts
+import { appIdentityFromEnv } from '@review-agent/app'
+import { DoNotRetry, runReviewJob } from '@review-agent/app/runner'
+
+// `decision` is what decideDelivery returned for a delivery, with kind 'review'.
+try {
+  const result = await runReviewJob({
+    identity: appIdentityFromEnv(process.env),   // REVIEW_AGENT_APP_CLIENT_ID and REVIEW_AGENT_APP_PRIVATE_KEY
+    installationId: decision.installationId,
+    request: decision.request,
+    focusConcurrency: 1,                         // optional; see below
+  })
+  console.log(result.kind)                       // 'reviewed', 'skipped' or 'refused'
+} catch (e) {
+  if (e instanceof DoNotRetry) { /* the model may have been paid: never run it again */ }
+  else { /* nothing was spent (or RetryThis: a crash at $0): your queue may try again */ }
+}
+```
+
+The process needs the same variables as the trigger.dev project: exactly one model credential, the App's client id
+and key, and optionally the record callback's. What trigger.dev did for you is yours to do: nothing starts another
+run for a free failure, and a check run a killed process left open is closed only by the next review of that commit —
+or by `closeStaleCheckRuns` from `@review-agent/github`, on a schedule of your own. A multi-reviewer review runs its three focuses **in this process**, side by side —
+`focusConcurrency` at a time, 3 when left out. Each is a Claude process of roughly 300 to 400 MiB, so on a machine
+with about 1 GB say `1`.
 
 ## Upgrading
 
 1. Update your clone, re-apply any change to `runnerDeployment`, and deploy the runner again (step 5).
 2. Update `@review-agent/app` and `@review-agent/core` in the receiver to the same version.
 3. Read the [changelog](../CHANGELOG.md) for anything that changes the record or the receiver.
+
+**To 0.2.0:** redeploy the runner, and that is all. Nothing is reconfigured — the same variables, task ids, payload,
+check-run name, record callback (`version: 1`, with fields added) and receiver — and the new `review-agent-focus` task
+registers itself with the deploy. A receiver's `TRIGGER_SECRET_KEY` needs nothing new: only the runner triggers the
+focus task, with its own credentials.
 
 ## When something goes wrong
 
@@ -305,3 +357,5 @@ used from a clone of this repository.
 | `GitHub refused an installation token …` | the client id and private key belong to a different App from the one installed, or the key was deleted on GitHub |
 | A `neutral` **Review refused** check | the person who asked has no push access |
 | A check run stuck `in_progress` | the run was killed; it closes after an hour (next review or sweep) |
+| A multi-reviewer summary says a focus `✗ (did not finish)`, and a `review-agent-focus` run failed | that focus failed every attempt before its reviewer answered; its run page says why. The review went on without it |
+| A `review-agent-focus` run failed with `the pull request moved on` | someone pushed while the focuses were queued; the review it belonged to was of the earlier commit |

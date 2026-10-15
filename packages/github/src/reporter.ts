@@ -81,7 +81,17 @@ const say = (s: ReportStart, message: string, fields: Record<string, unknown>): 
   try { s.log?.(message, fields) } catch { /* the log is the only thing lost */ }
 }
 
-const checkRunHandle = (s: ReportStart, created: { id: number; url: string | null }): ReportHandle => {
+/** The two GitHub calls a check-run report makes, as seams. The real ones when left out; the App's
+ *  runner hands in the ones its own tests watch, so moving it onto this reporter (0.2.0 Stage 6)
+ *  kept every assertion it already made about what a check run is created and completed with. */
+export type CheckRunCalls = {
+  createCheckRun?: typeof createCheckRun
+  completeCheckRun?: typeof completeCheckRun
+}
+
+const checkRunHandle = (
+  s: ReportStart, created: { id: number; url: string | null }, complete: typeof completeCheckRun,
+): ReportHandle => {
   let finished = false
   return {
     kind: 'check-run',
@@ -91,7 +101,7 @@ const checkRunHandle = (s: ReportStart, created: { id: number; url: string | nul
       if (finished) return null
       finished = true
       try {
-        return await completeCheckRun({
+        return await complete({
           octokit: s.octokit, owner: s.owner, repo: s.repo, checkRunId: created.id, outcome: f.outcome,
           // Both halves of the gate, together, and what checkRunOutput reads: annotations only in
           // check-only, capped at maxInline, and the bands the hidden verdict counts with.
@@ -117,12 +127,14 @@ const checkRunHandle = (s: ReportStart, created: { id: number; url: string | nul
 export const checkRunReporter = (o: {
   onStarted?: (checkRunId: number) => Promise<void>
   statusIfRefused?: boolean
+  calls?: CheckRunCalls
 } = {}): Reporter => ({
   kind: 'check-run',
   start: async (s) => {
+    const create = o.calls?.createCheckRun ?? createCheckRun
     let created: { id: number; url: string | null }
     try {
-      created = await createCheckRun({
+      created = await create({
         octokit: s.octokit, owner: s.owner, repo: s.repo, headSha: s.headSha, name: s.name,
         ...(s.externalId !== undefined && { externalId: s.externalId }),
       })
@@ -140,7 +152,7 @@ export const checkRunReporter = (o: {
         say(s, 'could not record the check run that was opened', { checkRunId: created.id, error: messageOf(e) })
       }
     }
-    return checkRunHandle(s, created)
+    return checkRunHandle(s, created, o.calls?.completeCheckRun ?? completeCheckRun)
   },
 })
 

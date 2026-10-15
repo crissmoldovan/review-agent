@@ -3,6 +3,8 @@ import { logger, metadata, task } from '@trigger.dev/sdk'
 import { appIdentityFromEnv } from '../credentials'
 import { REVIEW_TASK_ID, type ReviewTaskPayload } from '../dispatch'
 import { sdkTriggerPort } from '../trigger-port'
+import { focusesAsChildTasks } from './focus-run'
+import { sdkFocusBatch } from './focus-task'
 import { liveReviewTaskDeps } from './review-job'
 import { reviewTaskRun } from './review-run'
 import { asTriggerError } from './trigger-error'
@@ -64,6 +66,14 @@ export const reviewTask = task({
         // attempts of one run start it once.
         startAnotherRun: sdkTriggerPort,
         checkRunMemory: runMetadataMemory,
+        // A multi-reviewer review's focuses, each as a child task on a machine of its own, started
+        // together and waited for (spec 0.2.0 §8.3 point 4, decision §14.18 (a)): three Claude
+        // processes do not fit this one 1 GB machine.
+        runFocuses: focusesAsChildTasks({
+          installationId: payload.installationId,
+          batch: sdkFocusBatch,
+          log: (message, fields) => { logger.info(message, fields) },
+        }),
       }))
     } catch (e) {
       throw asTriggerError(e)

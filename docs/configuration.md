@@ -21,7 +21,7 @@ returns the built-in defaults below. Where each kind of deployment gets its sett
 | CLI | always `defaultDeploymentConfig()` | per-run flags only — see [the CLI](cli.md) |
 | App: the receiver | the object your receiver passes to `decideDelivery` | your receiver's code. **Only `command`, `autoReview` and `allowMulti` are read here** |
 | App: the runner | `runnerDeployment()` in `packages/app/src/tasks/review-job.ts` | edit that function before you deploy the runner — see [deploying](deploying.md#4-optional-change-the-runners-settings) |
-| In-process (`runReviewJob`) | the `deployment` you pass | your code |
+| In-process (`runReviewJob` from `@review-agent/app/runner`) | the `deployment` you pass | your code |
 
 In an App deployment the two halves are configured separately: the receiver decides **whether** a delivery is a
 review (`command`, `autoReview`); the runner decides **how** it is reviewed and reported (everything else). Keep the
@@ -110,7 +110,9 @@ failure does not sink the rest.
    refuted finding, and stays on the record. With the check pass off (`--skip-check`), nothing is merged, and the
    summary says the same problem may be listed twice.
 4. Side by side, three at a time, in the CLI and the library (`defaultRunReviewDeps({ concurrency })` changes it). The
-   App's runner runs them **one at a time**: three Claude processes do not fit its machine.
+   App's runner on trigger.dev runs **each as a child task of its own** (`review-agent-focus`), on a machine of its
+   own, because three Claude processes do not fit one; the review waits for all three, then checks and posts them as
+   one. In process (`@review-agent/app/runner`) they run side by side, `focusConcurrency` at a time.
 
 **Who may ask.** It runs only when somebody asks — a `/review --multi` comment, or the **Re-run** button on a review
 that ran it — and, in the App, only for someone with push access, like every requested review. An automatic review

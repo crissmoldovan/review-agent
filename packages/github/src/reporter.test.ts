@@ -1,6 +1,6 @@
 import type { Octokit } from '@octokit/core'
 import type { Finding } from '@review-agent/core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CheckOutcome } from './check-run'
 import {
   MAX_STATUS_DESCRIPTION_CHARS, checkRunReporter, commitStatusReporter, noReporter, reporterFor,
@@ -123,6 +123,26 @@ describe('checkRunReporter', () => {
     const gh = fakeGitHub({ ...answers, [CREATE_RUN]: { status: 500 } })
     await expect(checkRunReporter({ statusIfRefused: true }).start(startFor(gh.octokit))).rejects.toMatchObject({ status: 500 })
     expect(gh.calls.some((c) => c.route === STATUS)).toBe(false)
+  })
+
+  it('creates and completes through the calls it is handed, with exactly what it would send GitHub', async () => {
+    // The App's runner hands in the two functions its own tests watch (0.2.0 Stage 6); the shapes
+    // they are called with are the contract those tests were written against.
+    const gh = fakeGitHub({})
+    const createCheckRun = vi.fn(async () => ({ id: 4242, url: null }))
+    const completeCheckRun = vi.fn(async () => 'neutral' as const)
+    const handle = await checkRunReporter({ calls: { createCheckRun, completeCheckRun } })
+      .start(startFor(gh.octokit, { externalId: 'eyJ0aWVyIjoibm9ybWFsIn0' }))
+    expect(await handle?.finish({ outcome: failed('stopped') })).toBe('neutral')
+    expect(createCheckRun.mock.calls).toEqual([[{
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', headSha: HEAD, name: 'review-agent', externalId: 'eyJ0aWVyIjoibm9ybWFsIn0',
+    }]])
+    expect(completeCheckRun.mock.calls).toEqual([[{
+      octokit: gh.octokit, owner: 'acme', repo: 'widgets', checkRunId: 4242, outcome: failed('stopped'),
+      gate: { failAtOrAbove: null, requiresConfirmed: false }, mode: 'inline+summary', maxInline: 15,
+      bands: { critical: 9, high: 7, medium: 4 },
+    }]])
+    expect(gh.calls).toEqual([])
   })
 })
 

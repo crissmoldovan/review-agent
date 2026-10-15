@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup'
 import { SHIP_SOURCEMAPS } from './sourcemaps'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/receiver.ts'],
+  entry: ['src/index.ts', 'src/receiver.ts', 'src/runner.ts'],
   format: ['esm'],
   target: 'node22',
   dts: true,

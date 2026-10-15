@@ -7,10 +7,11 @@ import {
 import {
   closeCheckRunIfInProgress, completeCheckRun, createCheckRun, defaultRunReviewDeps, fetchPullRequest,
   fetchRepoConfig, findSummaryComment, octokitFor, publishReview, pushAccessOf, runReview,
-  type RunReviewDeps,
+  type FocusRunner, type RunReviewDeps,
 } from '@review-agent/github'
-import { installationToken, type AppIdentity } from '../credentials'
+import { appBotLogin, installationToken, type AppIdentity } from '../credentials'
 import type { TriggerPort } from '../dispatch'
+import { FOCUS_DEADLINE_MS, type FocusTaskDeps } from './focus-run'
 import { sendRecordCallback, type RecordCallback } from './record-callback'
 import {
   DEFAULT_DEADLINE_MS, reviewTaskRun, type CheckRunMemory, type ReviewTaskDeps, type ReviewTaskResult,
@@ -88,15 +89,21 @@ export { octokitFor, pushAccessOf }
  *  the runner's own skill cache. Checkouts go under the system temp directory, a new directory per
  *  review, as they always have.
  *
- *  ONE focused reviewer at a time on a multi-reviewer review (spec 0.2.0 §8.3 point 4). One review
- *  peaks around 400 MiB and the runner's trigger.dev machine has 1 GB, so three Claude processes side
- *  by side do not fit. One at a time costs wall clock, not money, and stays well inside the 30-minute
- *  deadline at every measured review length (55s to 4m40s each, design §8). Decision §14.18 replaces
- *  this with a child task per focus (plan Stage 6). */
-export const RUNNER_FOCUS_CONCURRENCY = 1
-
-export const liveRunReviewDeps = (a: { note: (s: string) => void }): RunReviewDeps => ({
-  ...defaultRunReviewDeps({ note: a.note, concurrency: RUNNER_FOCUS_CONCURRENCY }),
+ *  The focuses of a multi-reviewer review (spec 0.2.0 §8.3 point 4):
+ *  - on trigger.dev, `runFocuses` — a child task per focus (`review-agent-focus`), each on a machine
+ *    of its own, which the deployed task passes (decision §14.18 (a)). One review peaks around
+ *    400 MiB and the runner's machine has 1 GB, so three Claude processes side by side do not fit
+ *    one; until 0.2.0's Stage 6 the runner ran them one at a time instead.
+ *  - in process (`runReviewJob`, on other hosting), side by side, `focusConcurrency` at a time —
+ *    3 when left out (`DEFAULT_FOCUS_CONCURRENCY`), and fewer on a host short of memory. */
+export const liveRunReviewDeps = (a: {
+  note: (s: string) => void
+  focusConcurrency?: number
+  runFocuses?: FocusRunner
+}): RunReviewDeps => ({
+  ...defaultRunReviewDeps({
+    note: a.note, ...(a.focusConcurrency !== undefined && { concurrency: a.focusConcurrency }),
+  }),
   // Per user (spec 0.2.0 §9.3 P13). The temp directory is shared, and one cache directory for every
   // account on the machine let any of them plant an entry under the name this runner would look up;
   // `materialiseSkills` now creates it 0700 and trusts only what this user owns. The uid, not the
@@ -104,7 +111,20 @@ export const liveRunReviewDeps = (a: { note: (s: string) => void }): RunReviewDe
   // the deps are built, so a deployment's environment is what the review that runs under it sees.
   skillCacheDir: () => process.env.REVIEW_AGENT_SKILL_CACHE ??
     join(tmpdir(), `review-agent-skills-${process.getuid?.() ?? userInfo().username}`),
+  ...(a.runFocuses !== undefined && { runFocuses: a.runFocuses }),
 })
+
+/** The App's own login, once per process for each App: it does not change while a worker lives, and
+ *  a review should not pay a round trip for it twice. Only an answer is kept — a failure is asked
+ *  again next time — and a failure is the caller's to log, never a reason to stop a review. */
+const appLogins = new Map<string, string>()
+const liveAppLogin = async (identity: AppIdentity): Promise<string> => {
+  const known = appLogins.get(identity.clientId)
+  if (known !== undefined) return known
+  const login = await appBotLogin({ identity })
+  appLogins.set(identity.clientId, login)
+  return login
+}
 
 export const liveReviewTaskDeps = (a: {
   identity: () => AppIdentity
@@ -119,6 +139,11 @@ export const liveReviewTaskDeps = (a: {
   checkRunMemory: CheckRunMemory | null
   recordCallback?: RecordCallback | null
   deployment?: () => DeploymentConfig
+  /** Where a multi-reviewer review's focuses run. The deployed task passes child tasks; left out,
+   *  they run in this process (`liveRunReviewDeps`). */
+  runFocuses?: FocusRunner
+  /** In process only: how many focuses run side by side. */
+  focusConcurrency?: number
 }): ReviewTaskDeps => ({
   env: process.env,
   identity: a.identity,
@@ -136,7 +161,11 @@ export const liveReviewTaskDeps = (a: {
   runReview,
   // The pipeline's progress lines are log lines here, so what a person waits on in a terminal is
   // what an operator reads on the run page.
-  runReviewDeps: liveRunReviewDeps({ note: (s: string) => { a.log(s, {}) } }),
+  runReviewDeps: liveRunReviewDeps({
+    note: (s: string) => { a.log(s, {}) },
+    ...(a.runFocuses !== undefined && { runFocuses: a.runFocuses }),
+    ...(a.focusConcurrency !== undefined && { focusConcurrency: a.focusConcurrency }),
+  }),
   publishReview,
   createCheckRun,
   completeCheckRun,
@@ -147,13 +176,44 @@ export const liveReviewTaskDeps = (a: {
   startAnotherRun: a.startAnotherRun,
   recordCallback: a.recordCallback === undefined ? runnerRecordCallback() : a.recordCallback,
   sendRecord: sendRecordCallback,
+  appLogin: liveAppLogin,
+})
+
+/** The collaborators of one focus run as a child task (`review-agent-focus`, spec 0.2.0 §8.3 point 4):
+ *  the same token, client, reads, checkout, skill cache and engine as the review that started it,
+ *  and the same deployment — so the focus resolves exactly the settings its review resolved. */
+export const liveFocusTaskDeps = (a: {
+  identity: () => AppIdentity
+  log: (message: string, fields: Record<string, unknown>) => void
+}): FocusTaskDeps => ({
+  env: process.env,
+  identity: a.identity,
+  deployment: runnerDeployment,
+  deadlineMs: FOCUS_DEADLINE_MS,
+  installationToken,
+  makeOctokit: (token: string) => octokitFor({ token }),
+  fetchPullRequest,
+  fetchRepoConfig,
+  runReviewDeps: liveRunReviewDeps({ note: (s: string) => { a.log(s, {}) } }),
+  log: a.log,
 })
 
 /** The task's whole run, in process, with no trigger.dev runtime: what Task 15's one paid review
- *  calls, and what a deployment on other hosting calls from its own runner (design §6). It is the
- *  SAME code the task runs, so the real posted review proves the task rather than a copy of it.
- *  It lives here and not in review-task.ts because that module calls `task()` at import, which is
- *  not verified to work outside a deployed worker. */
+ *  calls, and what a deployment on other hosting calls from its own job system (spec 0.2.0 §3.1,
+ *  §7) — published as `@review-agent/app/runner` since 0.2.0. It is the SAME code the task runs, so
+ *  a real posted review proves the task rather than a copy of it. It lives here and not in
+ *  review-task.ts because that module calls `task()` at import, and nothing reachable from here
+ *  imports `@trigger.dev/sdk` at all (`src/runner-boundary.test.ts`).
+ *
+ *  What differs from the deployed task is only what trigger.dev provides: nothing starts another run
+ *  for a free failure, nothing remembers a check run across attempts, and a multi-reviewer review's
+ *  focuses run in this process, `focusConcurrency` at a time (3 when left out — one review peaks
+ *  around 400 MiB, so a 1 GB host says 1).
+ *
+ *  It returns `reviewed`, `skipped` or `refused`, and throws for everything else: `DoNotRetry` when
+ *  running it again would pay for the model again or could not help, `RetryThis` for a crash at $0,
+ *  and any other error for a failure before anything was spent. A host's own retry policy reads
+ *  exactly that: never retry a `DoNotRetry`. */
 export const runReviewJob = (a: {
   identity: AppIdentity
   installationId: number
@@ -161,6 +221,7 @@ export const runReviewJob = (a: {
   deployment?: DeploymentConfig
   signal?: AbortSignal
   log?: (message: string, fields: Record<string, unknown>) => void
+  focusConcurrency?: number
 }): Promise<ReviewTaskResult> => {
   const log = a.log ?? ((message: string, fields: Record<string, unknown>) => {
     process.stderr.write(`${message} ${JSON.stringify(fields)}\n`)
@@ -181,6 +242,7 @@ export const runReviewJob = (a: {
         log('metric', { name, value, ...attributes })
       },
       ...(deployment !== undefined && { deployment: () => deployment }),
+      ...(a.focusConcurrency !== undefined && { focusConcurrency: a.focusConcurrency }),
     }),
   )
 }

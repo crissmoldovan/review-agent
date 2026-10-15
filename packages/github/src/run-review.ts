@@ -7,9 +7,9 @@ import {
   resolveSettings, REVIEW_LENSES, reviewJsonSchema, reviewSystemPrompt, runFocusedReviews, scanForSecrets,
   SecretLeak, writesSummaryComment,
   type CheckVerdict, type ClaudeRuntime, type DeploymentConfig, type EngineInput, type EngineResult,
-  type FocusRun, type MaterialisedSkill, type materialiseSkills, type PreviousFinding,
+  type FocusRun, type Lens, type MaterialisedSkill, type materialiseSkills, type PreviousFinding,
   type RecheckPassResult, type ResolvedSettings, type ReviewOutput, type ReviewRecord, type ReviewRequest,
-  type runCheckPass, type runEngine, type runRecheckPass, type UnwrittenEntry, type Usage,
+  type runCheckPass, type runEngine, type runRecheckPass, type SecretHit, type UnwrittenEntry, type Usage,
 } from '@review-agent/core'
 import type { downloadArchive } from './archive'
 import type { fetchPullRequest, PullRequestContext } from './pr'
@@ -39,6 +39,40 @@ export type RecheckResult = RecheckPassResult & { asked: PreviousFinding[] }
  *  reviewed — a webhook payload can be minutes old by the time a task picks it up. */
 export type ReviewAsk = Omit<ReviewRequest, 'repo' | 'pr' | 'headSha'>
 
+/** What a focus runner hands back: every focus as it ended, in `REVIEW_LENSES` order, and the secret
+ *  patterns any focus's answer matched — names and places, never the text. A focus whose answer
+ *  matched one comes back with no output, and the review is then withheld as a whole, exactly as it
+ *  is when the answers of focuses run in this process match one (`assertNoSecrets` over their union). */
+export type FocusRunsOutcome = { runs: FocusRun[]; withheld: SecretHit[] }
+
+/** Runs the focused reviewers of a multi-reviewer review somewhere other than this process: the App's
+ *  runner on trigger.dev, where three Claude processes do not fit one 1 GB machine, starts a child
+ *  task per focus and waits for them (spec 0.2.0 §8.3 point 4, decision §14.18 (a)). Every other
+ *  caller leaves it out, and the focuses run here, side by side (`runFocusedReviews`).
+ *
+ *  Called BEFORE this review downloads anything. A runner elsewhere downloads the commit for itself
+ *  — `pr.headSha`, the commit this review is of, never a later one — and nothing here has to survive
+ *  the wait: a trigger.dev parent waiting on its children is checkpointed and restored, and what is
+ *  restored is documented as memory and open file descriptors, not as files written to disk
+ *  (trigger.dev 4.5.16 docs, how-it-works). The checkout the check pass reads is downloaded after it
+ *  returns.
+ *
+ *  The contract is `runFocusedReviews`'s, so a review cannot tell where its focuses ran: each focus
+ *  is reviewed with what `ask` resolves to over this pull request, with the tier's whole budget; one
+ *  that could not run comes back as a `crashed` focus, named through `onFailure`, and the review goes
+ *  on without it; only when none could run does it throw, with the first error; a stop that lands
+ *  before any focus started throws its reason. */
+export type FocusRunner = (a: {
+  pr: PullRequestContext
+  /** What was asked, as this review was asked it: a runner elsewhere resolves the settings from it,
+   *  over the same deployment and the same base commit's settings file, rather than being trusted
+   *  with settings someone else resolved. */
+  ask: ReviewAsk
+  settings: ResolvedSettings
+  signal?: AbortSignal
+  onFailure?: (lens: Lens, error: unknown) => void
+}) => Promise<FocusRunsOutcome>
+
 export type RunReviewDeps = {
   fetchPullRequest: typeof fetchPullRequest
   fetchRepoConfig: typeof fetchRepoConfig
@@ -56,9 +90,13 @@ export type RunReviewDeps = {
   note: (s: string) => void
   /** How many focused reviewers of a multi-reviewer review run at once (spec 0.2.0 §8.3 point 4); a
    *  review by one reviewer ignores it. `defaultRunReviewDeps` says 3 — all of them, side by side, on
-   *  a laptop, CI or a VPS. The App's runner says 1: three Claude processes do not fit its 1 GB machine.
-   *  Left out, `DEFAULT_FOCUS_CONCURRENCY` (3). */
+   *  a laptop, CI or a VPS. A host short of memory says fewer. Left out, `DEFAULT_FOCUS_CONCURRENCY`
+   *  (3). Not read when `runFocuses` is given. */
   concurrency?: number
+  /** Where the focuses of a multi-reviewer review run, when not in this process (`FocusRunner`). The
+   *  App's runner on trigger.dev passes one that starts a child task per focus; left out, they run
+   *  here, `concurrency` at a time. */
+  runFocuses?: FocusRunner
 }
 
 export type RunReviewResult = {
@@ -111,7 +149,11 @@ const repositoryPath = (file: string, checkoutRoots: readonly string[]): string 
   return slashed
 }
 
-const withRepositoryPaths = (output: ReviewOutput, checkoutDir: string): ReviewOutput => {
+/** A review's findings with their `file` as the repository writes it (spec 0.2.0 §9.3 P11), against the
+ *  checkout the model read. Exported for a focus run elsewhere (`FocusRunner`): its model read a
+ *  checkout of its own, which this review never sees, so it is the one that can make an absolute path
+ *  under that checkout relative. */
+export const withRepositoryPaths = (output: ReviewOutput, checkoutDir: string): ReviewOutput => {
   let resolved = checkoutDir
   try { resolved = realpathSync(checkoutDir) } catch { /* a checkout that is not there resolves to itself */ }
   const roots = resolved === checkoutDir ? [checkoutDir] : [checkoutDir, resolved]
@@ -184,6 +226,28 @@ export const runReview = async (a: {
     deps.note(`ignored, the deployment does not allow it: ${settings.droppedRequestKeys.join(', ')}`)
   }
 
+  // The focuses of a multi-reviewer review, run elsewhere (`FocusRunner`): before this review's own
+  // checkout exists, so nothing of it has to outlive the wait, and so a review whose focuses all
+  // failed downloaded nothing. Run here instead, they are run below, over the checkout.
+  let focusRuns: FocusRun[] = []
+  const elsewhere = settings.multi ? deps.runFocuses : undefined
+  const noteCouldNotRun = (lens: Lens, e: unknown): void => {
+    deps.note(`the ${lens} reviewer could not run, and the review goes on without it: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  const couldNotRun = new Set<string>()
+  if (elsewhere !== undefined) {
+    deps.note(`running ${REVIEW_LENSES.length} focused reviewers (${REVIEW_LENSES.join(', ')}), each as a task of its own with this tier's budget: up to $${settings.budget.ceilingUsd.toFixed(2)} apiece at per-token API prices`)
+    const outcome = await elsewhere({
+      pr, ask: a.ask, settings,
+      ...(a.signal !== undefined && { signal: a.signal }),
+      onFailure: (lens, e) => { couldNotRun.add(lens); noteCouldNotRun(lens, e) },
+    })
+    focusRuns = outcome.runs
+    // What a focus said that matched a secret pattern never reached this process, and the review is
+    // withheld as one run here would be: by the same error, after the money is counted.
+    if (outcome.withheld.length > 0) throw new SecretLeak(outcome.withheld)
+  }
+
   const checkoutDir = await deps.makeCheckoutDir()
   // From here on the checkout exists. A failure removes it before it propagates: no publish will read
   // it. On success it is the caller's, who removes it once publishing has placed the comments.
@@ -224,21 +288,19 @@ export const runReview = async (a: {
     // One reviewer, or one per focus (spec 0.2.0 §8.3). Each focus runs through `deps.runEngine`, the
     // same function one reviewer does, so a caller that wraps it to watch the spend sees every focus's;
     // each has the tier's budget and ceiling, and a focus that fails is recorded rather than allowed
-    // to fail the review (`runFocusedReviews`). Their answers are then one engine result
-    // (`combineFocusRuns`), and nothing below this line needs to know there were several.
-    let focusRuns: FocusRun[] = []
+    // to fail the review (`runFocusedReviews`). Focuses a `FocusRunner` ran elsewhere already came
+    // back above, under the same rules. Their answers are then one engine result
+    // (`combineFocusRuns`), and nothing below this line needs to know there were several, or where.
     let ran: EngineResult
     if (settings.multi) {
-      const concurrency = deps.concurrency ?? DEFAULT_FOCUS_CONCURRENCY
-      deps.note(`running ${REVIEW_LENSES.length} focused reviewers (${REVIEW_LENSES.join(', ')}), ${concurrency} at a time, each with this tier's budget: up to $${settings.budget.ceilingUsd.toFixed(2)} apiece at per-token API prices`)
-      const couldNotRun = new Set<string>()
-      focusRuns = await runFocusedReviews({
-        input, run: deps.runEngine, concurrency,
-        onFailure: (lens, e) => {
-          couldNotRun.add(lens)
-          deps.note(`the ${lens} reviewer could not run, and the review goes on without it: ${e instanceof Error ? e.message : String(e)}`)
-        },
-      })
+      if (elsewhere === undefined) {
+        const concurrency = deps.concurrency ?? DEFAULT_FOCUS_CONCURRENCY
+        deps.note(`running ${REVIEW_LENSES.length} focused reviewers (${REVIEW_LENSES.join(', ')}), ${concurrency} at a time, each with this tier's budget: up to $${settings.budget.ceilingUsd.toFixed(2)} apiece at per-token API prices`)
+        focusRuns = await runFocusedReviews({
+          input, run: deps.runEngine, concurrency,
+          onFailure: (lens, e) => { couldNotRun.add(lens); noteCouldNotRun(lens, e) },
+        })
+      }
       for (const f of focusRuns) {
         if (f.result.output === null && !couldNotRun.has(f.lens)) {
           deps.note(`the ${f.lens} reviewer returned no answer (${f.result.failure?.kind ?? 'no output'}); the review goes on without it`)

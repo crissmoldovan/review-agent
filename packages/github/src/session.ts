@@ -6,7 +6,7 @@ import {
 } from '@review-agent/core'
 import type { ReviewVia } from './body'
 import {
-  checkRunWanted, verdictJson, type CheckConclusion, type CheckGate, type CheckOutcome,
+  checkRunWanted, gateOf, verdictJson, type CheckConclusion, type CheckOutcome,
 } from './check-run'
 import { removeCheckout } from './checkout'
 import { recheckQuestions, type MarkerState } from './marker'
@@ -17,7 +17,7 @@ import { refuseUnbuilt } from './refusals'
 import { fetchRepoConfig as fetchRepoConfigLive } from './repo-config'
 import { noReporter, type ReportHandle, type ReportKind, type Reporter } from './reporter'
 import {
-  runReview as runReviewLive, type ReviewAsk, type RunReviewDeps, type RunReviewResult,
+  runReview as runReviewLive, type FocusRunner, type ReviewAsk, type RunReviewDeps, type RunReviewResult,
 } from './run-review'
 
 // ── What the App's runner and the session share ──────────────────────────────────────────────────
@@ -109,13 +109,6 @@ export const postedCommentsOf = (published: { headSha: string; marker: MarkerSta
  *  harder limit of its own passes a shorter `deadlineMs`, so the session's stop is the one that fires
  *  and the report is completed rather than left running. */
 export const DEFAULT_SESSION_DEADLINE_MS = 30 * 60 * 1000
-
-/** The one mapping from the two gate settings to the report's `CheckGate`: the setting is
- *  `gateRequiresConfirmed` and the gate's field is `requiresConfirmed` (Criss, decisions 5 and 6). */
-const gateOf = (report: DeploymentConfig['report']): CheckGate => ({
-  failAtOrAbove: report.failAtOrAbove,
-  requiresConfirmed: report.gateRequiresConfirmed,
-})
 
 // ── The session ──────────────────────────────────────────────────────────────────────────────────
 
@@ -246,7 +239,7 @@ export async function prepareReview(a: {
   // in silence — today, a `multi` with `allowMulti: false` (spec 0.2.0 §14.19). Applied here, so the
   // CLI and an SDK host refuse exactly what the App refuses. Whether a review is automatic is the
   // caller's to know, not this function's — the App's runner refuses `multi` on an automatic review
-  // itself (§14.19), and must keep doing so when it moves onto this function (plan Stage 6). The ask's
+  // itself (§14.19) before it calls this function, as it did before it moved onto it. The ask's
   // own `repo`, `pr` and `headSha`, if a JavaScript caller put them there, go too: the review is of
   // the pull request fetched below and nothing else.
   const unbuilt = refuseUnbuilt(a.ask as Partial<ReviewRequest>, { allowMulti: a.deployment.allowMulti })
@@ -283,6 +276,16 @@ export type SessionDeps = {
   /** Operational lines — never the review itself. Never allowed to fail a review. */
   log?: (message: string, fields: Record<string, unknown>) => void
 }
+
+/** A `FocusRunner`, watched: the engine counts as started before the focuses are asked for, and what
+ *  they report spending is added to the spend the session knows of, the moment they answer. */
+const watchFocuses = (run: FocusRunner, spend: { engineStarted: boolean; usd: number }): FocusRunner =>
+  async (x) => {
+    spend.engineStarted = true
+    const outcome = await run(x)
+    spend.usd += outcome.runs.reduce((total, r) => total + r.result.usage.costUsd, 0)
+    return outcome
+  }
 
 /** A repository config with its mode taken out, for a review whose mode the session has settled. */
 const withoutMode = (c: RepoConfig | null): RepoConfig | null => {
@@ -330,6 +333,14 @@ export async function runReviewSession(a: {
    *  nothing about it, so no earlier finding is judged resolved and the pass costs nothing. Read only
    *  when posting: a review that posts nothing reads no previous summary at all. */
   reReview?: boolean
+  /** Hears the review the moment it has run — before anything is published or reported — whatever
+   *  it produced: the place a host records what the model cost, which it must not miss because
+   *  publishing failed. The App's runner emits its metrics and its "review finished" line here, where
+   *  it always has (0.2.0 Stage 6). It runs after the money is spent, so a throw from it is a failure
+   *  like any other there — the report says the review did not complete, the result is `failed` at
+   *  stage `model` and not retryable — never a free-looking error that buys the review again. Not
+   *  called for a review that threw: there is no review to hear. */
+  onReviewed?: (review: RunReviewResult) => void | Promise<void>
   deps: SessionDeps
 }): Promise<SessionResult> {
   const { prepared } = a
@@ -463,6 +474,11 @@ export async function runReviewSession(a: {
         spend.usd += judged.usage.costUsd
         return judged
       },
+      // Focuses run elsewhere (spec 0.2.0 §8.3 point 4) are model spend like any other: watched the
+      // same way, so a failure after they ran is never mistaken for one that spent nothing. Counted
+      // as started before they are asked for — what a focus that failed had spent is not known here,
+      // and not knowing is never read as nothing.
+      ...(base.runFocuses !== undefined && { runFocuses: watchFocuses(base.runFocuses, spend) }),
     }
 
     // The previous review's marker, before the review, because the re-review pass's question comes
@@ -517,6 +533,9 @@ export async function runReviewSession(a: {
     }
 
     const { record } = review
+    // The caller's bookkeeping, before anything is published. Inside this `try`: a throw lands in the
+    // catch-all below, which finishes the report and returns a failure that spent.
+    await a.onReviewed?.(review)
 
     // A review that is FINISHED is published, even if the stop landed while it was finishing
     // (Criss, 2026-09-16): the re-review pass swallows its own abort and returns normally, so a

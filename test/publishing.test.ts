@@ -323,6 +323,36 @@ describe('what a published tarball carries', () => {
     }
   })
 
+  it('publishes @review-agent/app/runner as a bundle that never loads trigger.dev (spec 0.2.0, plan Stage 6)', () => {
+    // A host running the review on its own hosting installs the App package and imports the runner;
+    // trigger.dev is the deployed runner's business, not theirs. The source-level rule is
+    // packages/app/src/runner-boundary.test.ts; this is the same rule over what is actually shipped,
+    // because a bundler's shared chunks are where an import the source never made could appear.
+    const app = packed.find((p) => p.dir === 'app')
+    if (app === undefined) throw new Error('the app package was not packed')
+    const runner = app.manifest.exports?.['./runner']
+    expect(typeof runner === 'object' ? runner.import : runner).toBe('./dist/runner.js')
+    const seen = new Set<string>()
+    const queue = ['dist/runner.js']
+    while (queue.length > 0) {
+      const path = queue.pop() as string
+      if (seen.has(path)) continue
+      seen.add(path)
+      const source = fromTarball(app.tarball, path)
+      for (const specifier of bareImports(source)) {
+        expect(specifier, `${path} imports ${specifier}`).not.toMatch(/^@trigger\.dev\//)
+      }
+      for (const m of source.matchAll(/(?:from\s*|import\(\s*|import\s+)["'](\.\/[^"']+)["']/g)) {
+        queue.push(join(dirname(path), m[1]).split('\\').join('/'))
+      }
+    }
+    // It walked the bundle's chunks, and the rule can see an import where there is one: the
+    // receiver's chunk does import the SDK, lazily, to trigger a review.
+    expect(seen.size).toBeGreaterThan(1)
+    const all = app.paths.filter((f) => f.endsWith('.js')).map((f) => fromTarball(app.tarball, f))
+    expect(all.some((source) => bareImports(source).includes('@trigger.dev/sdk'))).toBe(true)
+  })
+
   it('is publishable, says which Node it needs, and says where its source is', () => {
     for (const p of packed) {
       expect(p.manifest.private, `${p.name} is still private`).toBeUndefined()

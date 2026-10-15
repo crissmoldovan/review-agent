@@ -9,7 +9,9 @@ import {
 } from '@review-agent/core'
 import { describe, expect, it, vi } from 'vitest'
 import type { PullRequestContext } from './pr'
-import { runReview, type ReviewAsk, type RunReviewDeps } from './run-review'
+import {
+  runReview, type FocusRunner, type FocusRunsOutcome, type ReviewAsk, type RunReviewDeps,
+} from './run-review'
 
 // The same two shas repo-config.test.ts uses, so base and head are told apart by eye in a failure.
 const BASE_SHA = '0d5a1b3c9e7f2a4b6c8d0e2f4a6b8c0d2e4f6a8b'
@@ -667,5 +669,83 @@ describe('runReview: the multi-reviewer mode (spec 0.2.0 §8.3)', () => {
     // Three basic focuses, $5.00 each.
     expect(asked.ceilingUsd).toBe(15)
     expect(asked.spentUsd).toBeCloseTo(USAGE.costUsd * 3 + CHECK_USAGE.costUsd, 6)
+  })
+})
+
+// Decision §14.18 (a): on trigger.dev each focus is a child task of its own. `runReview` cannot tell
+// where its focuses ran — the seam takes over the engine step and nothing else.
+describe('runReview: focuses run elsewhere (spec 0.2.0 §8.3 point 4)', () => {
+  const focusRun = (lens: 'intent' | 'impact' | 'security', result: EngineResult = RESULT) => ({ lens, result })
+  const elsewhere = (over: Partial<FocusRunsOutcome> = {}) =>
+    vi.fn(async (_a: Parameters<FocusRunner>[0]): Promise<FocusRunsOutcome> => ({
+      runs: [focusRun('intent'), focusRun('impact'), focusRun('security')], withheld: [], ...over,
+    }))
+
+  it('hands the focuses to the runner, never to this process’s engine, and checks their union once', async () => {
+    const runFocuses = elsewhere()
+    const d = deps({ runFocuses })
+    const r = await run(d, { multi: true, tier: 'normal', requestedBy: 'alice' })
+
+    expect(runFocuses).toHaveBeenCalledTimes(1)
+    const asked = runFocuses.mock.calls[0][0]
+    // The commit this review is of, and what was asked — the runner resolves the rest itself.
+    expect(asked.pr.headSha).toBe(HEAD_SHA)
+    expect(asked.ask).toEqual({ multi: true, tier: 'normal', requestedBy: 'alice' })
+    expect(asked.settings.multi).toBe(true)
+    expect(d.runEngine).not.toHaveBeenCalled()
+    expect(d.runCheckPass).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(d.runCheckPass).mock.calls[0][0].focuses).toBe(3)
+    expect(r.record.focuses.map((f) => f.lens)).toEqual(['intent', 'impact', 'security'])
+    expect(r.record.usage.costUsd).toBeCloseTo(USAGE.costUsd * 3, 6)
+    expect(d.notes.some((n) => n.startsWith('running 3 focused reviewers (intent, impact, security), each as a task of its own'))).toBe(true)
+  })
+
+  it('asks for the focuses before this review has downloaded anything, so nothing of it has to outlive the wait', async () => {
+    const order: string[] = []
+    const d = deps({
+      runFocuses: vi.fn(async () => { order.push('focuses'); return { runs: [focusRun('intent'), focusRun('impact'), focusRun('security')], withheld: [] } }),
+      makeCheckoutDir: vi.fn(async () => { order.push('checkout'); return '/tmp/ra-fake-checkout' }),
+      downloadArchive: vi.fn(async (a: { destDir: string }) => { order.push('download'); return { dir: a.destDir, ...NOTHING_MISSING } }),
+    })
+    await run(d, { multi: true })
+    expect(order).toEqual(['focuses', 'checkout', 'download'])
+  })
+
+  it('runs one reviewer here when the request is not multi, whatever runner it was given', async () => {
+    const runFocuses = elsewhere()
+    const d = deps({ runFocuses })
+    await run(d, {})
+    expect(runFocuses).not.toHaveBeenCalled()
+    expect(d.runEngine).toHaveBeenCalledTimes(1)
+  })
+
+  it('goes on without a focus the runner could not run, and names it once', async () => {
+    const lost = { output: null, usage: NOTHING_SPENT, cutShort: false, wrapUpFired: false, failure: { kind: 'crashed' as const, code: null, stderr: 'the task failed' } }
+    const runFocuses = vi.fn(async (a: Parameters<FocusRunner>[0]): Promise<FocusRunsOutcome> => {
+      a.onFailure?.('impact', new Error('the impact task failed three times'))
+      return { runs: [focusRun('intent'), focusRun('impact', lost), focusRun('security')], withheld: [] }
+    })
+    const d = deps({ runFocuses })
+    const r = await run(d, { multi: true })
+    expect(r.result.failure).toBeNull()
+    expect(r.result.output?.findings.map((f) => f.lens)).toEqual(['intent', 'security'])
+    expect(d.notes).toContain('the impact reviewer could not run, and the review goes on without it: the impact task failed three times')
+    // Not also "returned no answer": one line per focus that went without.
+    expect(d.notes.filter((n) => n.includes('impact reviewer'))).toHaveLength(1)
+  })
+
+  it('withholds the whole review when a focus’s answer matched a secret pattern, and downloads nothing', async () => {
+    const d = deps({ runFocuses: elsewhere({ withheld: [{ pattern: 'github-token', where: 'security:summary' }] }) })
+    const thrown = await run(d, { multi: true }).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(SecretLeak)
+    expect((thrown as SecretLeak).hits).toEqual([{ pattern: 'github-token', where: 'security:summary' }])
+    expect(d.makeCheckoutDir).not.toHaveBeenCalled()
+    expect(d.runCheckPass).not.toHaveBeenCalled()
+  })
+
+  it('throws what the runner throws when no focus could run, before anything is downloaded', async () => {
+    const d = deps({ runFocuses: vi.fn(async () => { throw new Error('none of the three tasks ran') }) })
+    await expect(run(d, { multi: true })).rejects.toThrow('none of the three tasks ran')
+    expect(d.makeCheckoutDir).not.toHaveBeenCalled()
   })
 })

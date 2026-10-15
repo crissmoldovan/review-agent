@@ -11,9 +11,9 @@ import {
 } from '@review-agent/core'
 import {
   conclusionFor, runReview, STALE_AFTER_MS, VERDICT_OPEN, verdictJson,
-  type CheckConclusion, type CheckGate, type CheckOutcome, type FoundSummary, type MarkerRun,
-  type MarkerState, type PublishedReview, type PullRequestContext, type RunReviewDeps,
-  type RunReviewResult,
+  type CheckConclusion, type CheckGate, type CheckOutcome, type FocusRunner, type FocusRunsOutcome,
+  type FoundSummary, type MarkerRun, type MarkerState, type PublishedReview, type PullRequestContext,
+  type RunReviewDeps, type RunReviewResult,
 } from '@review-agent/github'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppIdentity } from '../credentials'
@@ -1140,8 +1140,9 @@ describe('what a finished review leaves behind', () => {
     // These metric and log calls run after the money is gone, and in the deployed runner they are
     // `logger.info` from @trigger.dev/sdk. A plain Error out of one of them would start a new run
     // (Step 45e) — the whole review, $0.345 to $1.06 at per-token API prices, bought again, up to
-    // twice more, because a logger had a bad moment. Step 40's catch is what stands there; this is
-    // the case that proves it does.
+    // twice more, because a logger had a bad moment. Step 40's catch stood there; since 0.2.0's
+    // Stage 6 the review session's catch-all does (the runner's bookkeeping runs in its `onReviewed`),
+    // and this is the case that proves it still does.
     const d = deps({ runReview, metric: () => { throw new Error('the logger blew up') } })
     const thrown = await reviewTaskRun(PAYLOAD, {}, d).catch((e: unknown) => e)
     expect(thrown).toBeInstanceOf(DoNotRetry)
@@ -1695,5 +1696,127 @@ describe('the review task: the downloaded code', () => {
     const d = deps({ runReview: vi.fn(async () => ({ ...reviewOf(), checkoutDir: dir })) })
     reviewedOf(await reviewTaskRun(PAYLOAD, {}, d))
     expect(existsSync(dir)).toBe(false)
+  })
+})
+
+// ── 0.2.0 Stage 6: the App on the review session ────────────────────────────────────────────────────
+// The runner keeps its own steps — the token, the release-only skip, the push-access gate, the check
+// run a killed attempt left open — and hands the rest to `runReviewSession`. These cases hold what it
+// hands over; every case above holds that a deployment sees the same review it always did.
+
+describe('the review session, as the App runs it (spec 0.2.0 §6)', () => {
+  it('hands every model pass the deployment’s one credential, named as this review’s own', async () => {
+    const d = deps()
+    await reviewTaskRun(PAYLOAD, {}, d)
+    const runtime = vi.mocked(d.runReview).mock.calls[0][0].runtime
+    expect(runtime?.credential?.kind).toBe('oauth-token')
+    // Held so that nothing prints it by accident (spec 0.2.0 §3.2).
+    expect(JSON.stringify(runtime)).not.toContain(CREDENTIAL)
+  })
+
+  it('finds this App’s own summary comment first and skips its own replies, by its bot login', async () => {
+    const appLogin = vi.fn(async (_i: AppIdentity) => 'review-agent[bot]')
+    const d = deps({ appLogin })
+    reviewedOf(await reviewTaskRun(PAYLOAD, {}, d))
+    expect(appLogin).toHaveBeenCalledWith(IDENTITY)
+    expect(vi.mocked(d.findSummaryComment).mock.calls[0][0]).toMatchObject({ selfLogin: 'review-agent[bot]' })
+    expect(vi.mocked(d.publishReview).mock.calls[0][0]).toMatchObject({
+      selfLogin: 'review-agent[bot]', ignoreRepliesFrom: 'review-agent[bot]',
+    })
+  })
+
+  it('reviews without its login when GitHub will not say it, and says so', async () => {
+    const d = deps({ appLogin: vi.fn(async () => { throw new Error(`GitHub would not describe the App: HTTP 500 ${LEAKED_TOKEN}`) }) })
+    expect((await reviewTaskRun(PAYLOAD, {}, d)).kind).toBe('reviewed')
+    const call = vi.mocked(d.publishReview).mock.calls[0][0]
+    expect(call.selfLogin).toBeUndefined()
+    expect(call.ignoreRepliesFrom).toBeUndefined()
+    expect(d.logs.map((l) => l.message)).toContain('the App’s own login could not be read; its summary comment is found by its marker alone')
+    expect(JSON.stringify(d.logs)).not.toContain(LEAKED_TOKEN)
+  })
+
+  it('does not ask for its login for a review it skips or refuses', async () => {
+    const appLogin = vi.fn(async () => 'review-agent[bot]')
+    await reviewTaskRun({ request: { repo: 'acme/widgets', pr: 16, headSha: HEAD }, installationId: 12_345_678 }, {}, deps({
+      appLogin, fetchPullRequest: vi.fn(async () => ({ ...PR, changedFiles: [{ path: 'CHANGELOG.md', status: 'modified' }] })),
+    }))
+    await reviewTaskRun(PAYLOAD, {}, deps({ appLogin, hasPushAccess: vi.fn(async () => false) }))
+    expect(appLogin).not.toHaveBeenCalled()
+  })
+})
+
+describe('a multi-reviewer review on trigger.dev: a child task per focus (spec 0.2.0 §8.3 point 4)', () => {
+  type Ran = { lens: 'intent' | 'impact' | 'security'; result: EngineResult }
+  const ran = (lens: Ran['lens'], result: EngineResult = RESULT): Ran => ({ lens, result })
+  const children = (runs: Ran[] = [ran('intent'), ran('impact'), ran('security')], withheld: FocusRunsOutcome['withheld'] = []) =>
+    vi.fn(async (_a: Parameters<FocusRunner>[0]): Promise<FocusRunsOutcome> => ({ runs, withheld }))
+  const MULTI: ReviewTaskPayload = { ...PAYLOAD, request: { ...REQUEST, multi: true } }
+
+  it('hands the focuses to the child tasks, runs no engine for them here, and checks their union once', async () => {
+    const runFocuses = children()
+    const d = deps({ runReview, runReviewDeps: runReviewDepsWith({ runFocuses }) })
+    const out = reviewedOf(await reviewTaskRun(MULTI, {}, d))
+    expect(runFocuses).toHaveBeenCalledTimes(1)
+    // The commit the check run is on, and what was asked: a child resolves its settings from them.
+    expect(runFocuses.mock.calls[0][0].pr.headSha).toBe(HEAD)
+    expect(runFocuses.mock.calls[0][0].ask).toMatchObject({ multi: true, requestedBy: 'crissmoldovan' })
+    expect(d.runReviewDeps.runEngine).not.toHaveBeenCalled()
+    expect(d.runReviewDeps.runCheckPass).toHaveBeenCalledTimes(1)
+    expect(out.record.focuses.map((f) => f.lens)).toEqual(['intent', 'impact', 'security'])
+    expect(out.record.costUsd).toBeCloseTo(USAGE.costUsd * 3 + CHECK_USAGE.costUsd, 6)
+    expect(vi.mocked(d.publishReview)).toHaveBeenCalledTimes(1)
+  })
+
+  it('never starts a focus child for an automatic review, however the payload asks', async () => {
+    const runFocuses = children()
+    const { requestId: _id, requestedBy: _by, ...automatic } = REQUEST
+    const d = deps({ runReview, runReviewDeps: runReviewDepsWith({ runFocuses }) })
+    await reviewTaskRun({ ...PAYLOAD, request: { ...automatic, multi: true } }, {}, d)
+    expect(runFocuses).not.toHaveBeenCalled()
+    expect(d.runReviewDeps.runEngine).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts no focus child for somebody who cannot push', async () => {
+    const runFocuses = children()
+    const d = deps({ runReview, hasPushAccess: vi.fn(async () => false), runReviewDeps: runReviewDepsWith({ runFocuses }) })
+    expect((await reviewTaskRun(MULTI, {}, d)).kind).toBe('refused')
+    expect(runFocuses).not.toHaveBeenCalled()
+  })
+
+  it('does not fail the review when one focus child failed', async () => {
+    const lost: EngineResult = {
+      output: null, usage: { ...USAGE, costUsd: 0 }, cutShort: false, wrapUpFired: false,
+      failure: { kind: 'crashed', code: null, stderr: 'the impact task failed three times' },
+    }
+    const d = deps({ runReview, runReviewDeps: runReviewDepsWith({ runFocuses: children([ran('intent'), ran('impact', lost), ran('security')]) }) })
+    const out = reviewedOf(await reviewTaskRun(MULTI, {}, d))
+    expect(out.record.failure).toBeNull()
+    expect(out.record.output?.findings.map((f) => f.lens)).toEqual(['intent', 'security'])
+    expect(out.record.focuses.find((f) => f.lens === 'impact')).toMatchObject({ finished: false, failure: { kind: 'crashed' } })
+  })
+
+  it('starts no new run, and knows what the children cost, when the review fails after they ran', async () => {
+    const startAnotherRun = vi.fn(async (_a: Parameters<TriggerPort>[0]) => ({ id: 'run_again_1' }))
+    const d = deps({
+      runReview, startAnotherRun,
+      runReviewDeps: runReviewDepsWith({ runFocuses: children(), runCheckPass: vi.fn(async () => { throw new Error('spawn EAGAIN') }) }),
+    })
+    const thrown = await reviewTaskRun(MULTI, {}, d).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(DoNotRetry)
+    expect((thrown as DoNotRetry).spentUsd).toBeCloseTo(USAGE.costUsd * 3, 6)
+    expect(startAnotherRun).not.toHaveBeenCalled()
+  })
+
+  it('withholds the whole review when a child’s answer matched a secret pattern, and records what it cost', async () => {
+    const d = deps({
+      runReview,
+      runReviewDeps: runReviewDepsWith({ runFocuses: children(undefined, [{ pattern: 'github-token', where: 'security:summary' }]) }),
+    })
+    const thrown = await reviewTaskRun(MULTI, {}, d).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(DoNotRetry)
+    expect(d.publishReview).not.toHaveBeenCalled()
+    const cost = d.metrics.find((m) => m.name === 'review.cost_usd')
+    expect(cost?.value).toBeCloseTo(USAGE.costUsd * 3, 6)
+    expect(cost?.attributes.outcome).toBe('withheld')
   })
 })
