@@ -1,0 +1,167 @@
+# review-agent in GitHub Actions: each pull request reviewed by a workflow — no GitHub App, no server
+# (spec 0.2.0, use case UC-4). The step-by-step guide: docs/guides/github-actions.md in the review-agent
+# repository.
+#
+# To use it: copy this file to .github/workflows/review-agent.yml in the repository to review, and add
+# one repository secret, ANTHROPIC_API_KEY (an Anthropic API key; reviews are billed to it at per-token
+# API prices).
+#
+# What it posts, as github-actions[bot]: a review with inline comments, a summary comment, and a check
+# run named "review-agent" on the reviewed commit. The workflow's own GITHUB_TOKEN is an installation
+# token, so the CLI's `--report auto` reports with a check run, which a branch rule can require and pin
+# to GitHub Actions (spec 0.2.0 §2.2).
+
+name: review-agent
+
+on:
+  # Automatic reviews: when a pull request opens, and when a draft is marked ready for review. Not on a
+  # push (`synchronize`): the reviewer reviews a pull request once and is asked again with /review,
+  # because every review costs money (docs/pull-requests.md, "When it reviews").
+  pull_request:
+    types: [opened, ready_for_review]
+  # Requested reviews: a comment whose first word is /review. GitHub delivers a pull request's
+  # conversation comments as issue comments; the job below keeps only those on a pull request.
+  issue_comment:
+    types: [created]
+  # Never `pull_request_target`. It runs with this repository's secrets and a write token even for a
+  # pull request from a fork, which is the opening for a fork to reach them (a "pwn request"); GitHub
+  # documents the risks, and blocks it by default in public repositories from 2026-11-02 (spec 0.2.0
+  # §10, citing https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target).
+  # Fork pull requests are skipped instead — see the first step.
+
+# What the job's GITHUB_TOKEN may do, and nothing more (spec 0.2.0 §9.2). Everything else is `none`.
+permissions:
+  contents: read          # download the pull request's code
+  pull-requests: write    # post the review, its inline comments and the summary comment
+  checks: write           # the "review-agent" check run
+  statuses: write         # the fallback when a check run is refused: a commit status (spec 0.2.0 §2.2)
+
+jobs:
+  review:
+    # Not "review-agent": a job is a check of its own, named after the job, and two checks called
+    # review-agent from GitHub Actions would make a branch rule that requires one ambiguous.
+    name: review-agent runner
+    # Decided before a runner starts, so an ordinary comment costs nothing:
+    # - a pull request that opened, or left draft — a draft is reviewed when it is marked ready;
+    # - or a comment that starts with /review, on a pull request, from the repository's owner, a member
+    #   of its organisation, or an outside collaborator. Anyone can comment on a public repository, and a
+    #   review is paid for by this repository's key. `author_association` is only a first filter — a
+    #   member or collaborator may still be read-only here — so the first step checks push access, the
+    #   rule the GitHub App applies to every requested review.
+    if: >-
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft)
+      || (github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && startsWith(github.event.comment.body, '/review')
+          && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    # A review stops itself after 30 minutes (the reviewer's own deadline); this is the backstop, with
+    # time to install.
+    timeout-minutes: 45
+    # One review of a pull request at a time. A second request waits rather than cancelling the first:
+    # a cancelled review has already been paid for. GitHub keeps one waiting per group, so a third
+    # replaces the second, which has spent nothing yet. Here on the job, not the workflow, so a comment
+    # that is not /review never enters the group (it is skipped by `if` first) and cannot displace one.
+    concurrency:
+      group: review-agent-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
+    env:
+      PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+    steps:
+      # Every value from the event reaches the shell as an environment variable, never as ${{ }} inside
+      # the script: a comment's text is written by whoever commented.
+      - name: Decide whether to review
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT: ${{ github.event.comment.body }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice title=review-agent skipped::$1"; echo "review=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # A pull request from a fork gets no secrets in a `pull_request` run (GitHub withholds them),
+          # so the review could not run; and a comment's run, which does get them, is not used to
+          # review a fork's code either. Skipped with a notice, never a failure or a misleading pass.
+          head_repo="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.head.repo.full_name // ""')"
+          if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+            skip "#$PR comes from a fork, and this workflow does not review forks (no secrets reach a fork's run). A maintainer can review it with the CLI: review-agent review --repo $GITHUB_REPOSITORY --pr $PR --post"
+          fi
+
+          # Dependabot's pull requests run like a fork's: no Actions secrets, a read-only token.
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$GITHUB_ACTOR" = "dependabot[bot]" ]; then
+            skip "Dependabot pull requests get no Actions secrets. Comment /review to have one reviewed."
+          fi
+
+          tier=""   # empty: the CLI's default tier, basic
+          if [ "$GITHUB_EVENT_NAME" = "issue_comment" ]; then
+            # The first word must be /review, in any case, and not /reviewer; the first line may name a tier,
+            # as `/review --tier normal`. Nothing else in the comment is read.
+            first_line="${COMMENT%%$'\n'*}"
+            first_line="${first_line%$'\r'}"
+            read -r -a words <<< "$first_line"
+            command_word="${words[0]:-}"
+            if [ "${command_word,,}" != "/review" ]; then
+              echo "review=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            for i in "${!words[@]}"; do
+              case "${words[$i]}" in
+                --tier=*) asked="${words[$i]#--tier=}" ;;
+                --tier) asked="${words[$((i + 1))]:-}" ;;
+                *) continue ;;
+              esac
+              case "$asked" in
+                basic|normal|thorough) tier="$asked" ;;
+                *) echo "::warning title=review-agent::--tier takes basic, normal or thorough; reviewing at the default tier." ;;
+              esac
+            done
+
+            # Push access, asked of GitHub: the requester pays with this repository's key, so they must
+            # be able to push here. Refused before anything is installed or spent.
+            push="$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$COMMENTER/permission" --jq '.user.permissions.push' 2>/dev/null || echo false)"
+            if [ "$push" != "true" ]; then
+              skip "@$COMMENTER asked for a review and does not have push access to $GITHUB_REPOSITORY; nothing was spent."
+            fi
+          fi
+
+          echo "review=true" >> "$GITHUB_OUTPUT"
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js 22
+        if: steps.gate.outputs.review == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Both pinned. Claude Code at the version the reviewer's flags were measured against (the App runner
+      # pins the same, packages/app/trigger.config.ts); review-agent at the version you tested — change
+      # 0.2.0 when you upgrade. The npm that ships with Node 22 runs Claude Code's install script, which
+      # puts the real binary in place of a placeholder (spec 0.2.0 §9.4); `claude --version` fails this
+      # step if it did not.
+      - name: Install Claude Code and review-agent
+        if: steps.gate.outputs.review == 'true'
+        run: |
+          npm install --global @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.0
+          claude --version
+          review-agent --version
+
+      # Reviews and posts as github-actions[bot]. `--yes` because there is nobody to answer a question
+      # (without a terminal the CLI asks nothing anyway, and says on stderr what it will post). Exit codes:
+      # 0 posted; 1 the review did not finish; 2 something is missing; 3 withheld because the output
+      # matched a secret pattern; 4 reviewed but posting failed (docs/cli.md, "Exit codes").
+      - name: Review and post
+        if: steps.gate.outputs.review == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TIER: ${{ steps.gate.outputs.tier }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error title=review-agent::The ANTHROPIC_API_KEY repository secret is not set (Settings → Secrets and variables → Actions)."
+            exit 2
+          fi
+          # --tier only when a /review comment named one, so an automatic review's record carries no request.
+          tier_flag=()
+          if [ -n "$TIER" ]; then tier_flag=(--tier "$TIER"); fi
+          review-agent review --repo "$GITHUB_REPOSITORY" --pr "$PR" "${tier_flag[@]}" --post --yes

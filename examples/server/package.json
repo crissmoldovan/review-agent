@@ -1,0 +1,29 @@
+{
+  "name": "review-agent-example-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "review-agent on your own server: the webhook receiver, an in-process queue and the SDK in one Node.js process",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@review-agent/app": "workspace:*",
+    "@review-agent/core": "workspace:*",
+    "@review-agent/github": "workspace:*",
+    "@review-agent/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

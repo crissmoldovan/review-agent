@@ -1,0 +1,16 @@
+# What the image is built from: package.json, package-lock.json, tsconfig.json, tsup.config.ts and src/.
+# Everything else stays out — above all anything that could hold a secret, which would otherwise be
+# baked into a layer anyone with the image can read.
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.env
+.env.*
+*.pem
+*.key
+.git
+.DS_Store
+# Tests are not built into dist/server.js; leaving them out keeps the build cache from moving when only
+# a test changed.
+src/**/*.test.ts

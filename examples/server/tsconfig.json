@@ -1,0 +1,22 @@
+{
+  // Standalone on purpose: this folder is meant to be copied out of the repository, and a config that
+  // extended ../../tsconfig.base.json would stop working the moment it was. The options mirror it.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    // Type-checking only. tsup builds dist/server.js (tsup.config.ts), keeping every dependency an
+    // import rather than bundling it.
+    "noEmit": true
+  },
+  "include": ["src", "tsup.config.ts"]
+}
