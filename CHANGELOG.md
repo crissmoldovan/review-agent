@@ -1,7 +1,7 @@
 # Changelog
 
-All four packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app` and `@review-agent/cli` — are
-released together, at the same version.
+All five packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app`, `@review-agent/cli` and
+`@review-agent/sdk` — are released together, at the same version (the SDK from 0.2.0).
 
 ## Unreleased (0.2.0)
 
@@ -127,6 +127,29 @@ released together, at the same version.
   only reads, prints no credential's value, and exits `0` when ready, `2` when not.
 - **Library:** core exports `resolveClaudeBinary`; `tokenIdentityOf` keeps a classic token's scope names
   (`scopes`); `ReviewVia`'s `cli` kind takes `from: 'command-line' | 'github-actions'`.
+
+### Stage 5 — the SDK: `@review-agent/sdk`
+
+- **A new package, `@review-agent/sdk`: the review as one call.** `reviewPullRequest({ repo, pr, github, credential, post, … })`
+  runs the same review session as the App and the CLI and returns `reviewed`, `unfinished`, `refused` or `failed` —
+  never throwing an outcome, so "found nothing" and "did not run" stay different. It posts nothing unless `post: true`.
+  [The SDK](docs/sdk.md).
+- **Credentials per review.** `{ apiKey }`, `{ oauthToken }` or `'claude-login'`, or exactly one from the environment.
+  The Claude process gets that credential and no other; it is never written to `process.env`, never logged, and a
+  subscription token is passed straight through and kept nowhere. `ANTHROPIC_BASE_URL` refuses every review.
+- **`authorize`**, a gate before anything is downloaded or spent — `authorize: pushAccessOf` with `requestedBy` is the
+  App's own; **`report`** (`auto`, `check-run`, `commit-status`, `none`); **`settings`**, merged over the defaults key by
+  key; **`onProgress`**, stage by stage; **`signal`** and **`deadlineMs`**; `multi: { concurrency }`.
+- Concurrent reviews in one process share nothing but the skill cache, and every checkout is removed when its review
+  ends. The SDK does not depend on `@review-agent/app`, so it never installs trigger.dev.
+
+### Stage 8 — continuous integration
+
+- **Windows is required** on every pull request, beside Linux (Node 22 and 24) and macOS, and an **Alpine** job runs
+  the suite on musl.
+- **The real Claude Code, at $0, on every OS**: CI installs the version the App runner pins and runs the engine with no
+  credential; it answers "Not logged in" without reaching a model, proving the binary is found and started with the
+  reviewer's real flags.
 
 ## 0.1.3
 

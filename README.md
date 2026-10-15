@@ -34,8 +34,9 @@ The retry logic moved into the client. Check every caller still handles a 429.
   posted to a real pull request through the deployed runner.
 - **New and not yet proven live:** the [re-review pass](docs/pull-requests.md#re-reviews) that asks the model
   whether earlier findings are still present, the [multi-reviewer mode](docs/configuration.md#the-multi-reviewer-mode)
-  (`/review --multi`: three focused reviewers, one check pass that also merges duplicates), and posting from the CLI
-  (`review-agent review --post`, with a commit status). All are covered by unit tests only; the multi-reviewer mode's
+  (`/review --multi`: three focused reviewers, one check pass that also merges duplicates), posting from the CLI
+  (`review-agent review --post`, with a commit status), and the [SDK](docs/sdk.md) — `reviewPullRequest()` from your
+  own Node.js code (`@review-agent/sdk`). All are covered by unit tests only; the multi-reviewer mode's
   cost is not measured yet.
 - **Not built yet:** a GitHub Action mode, and changing the runner's settings without editing one function.
 - **The same model varies from run to run.** One review is a sample.
@@ -142,13 +143,15 @@ subscription's allowance instead of billed. trigger.dev bills its compute separa
 | [Deploying](docs/deploying.md) | the receiver, the runner, the record callback, the sweep, troubleshooting |
 | [How it works](docs/how-it-works.md) | one review step by step, the passes, the record |
 | [Security model](docs/security.md) | what the reviewer can and cannot do, and why |
-| [Library reference](docs/library.md) | the four packages and their exports |
+| [The SDK](docs/sdk.md) | embedding the reviewer in your own service or script: every option, result and example |
+| [Library reference](docs/library.md) | the five packages and their exports |
 | [Changelog](CHANGELOG.md) | what changed in each release |
 
 ## Packages
 
 | Package | |
 |---|---|
+| [`@review-agent/sdk`](https://www.npmjs.com/package/@review-agent/sdk) | the review as one call from your own code |
 | [`@review-agent/cli`](https://www.npmjs.com/package/@review-agent/cli) | the `review-agent` command |
 | [`@review-agent/app`](https://www.npmjs.com/package/@review-agent/app) | the GitHub App: receiver library, credentials, manifest |
 | [`@review-agent/github`](https://www.npmjs.com/package/@review-agent/github) | reading pull requests and posting reviews |
