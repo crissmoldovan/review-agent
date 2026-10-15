@@ -55,12 +55,12 @@ The demo repository's pull requests, and the tier each calls for:
 
 | Pull request | Tier | Why |
 |---|---|---|
-| [#1](https://github.com/crissmoldovan/review-agent-demo/pull/1) `feat/order-notes` — no known problem | `basic` | small, local, easy to check. "No findings" is an answer: a well-formed empty list is a review that worked |
-| [#2](https://github.com/crissmoldovan/review-agent-demo/pull/2) `feat/currency-display` — a JPY formatting bug | `basic` | display code, local to one feature; [your first review](first-review.md) |
-| [#3](https://github.com/crissmoldovan/review-agent-demo/pull/3) `fix/refund-rounding` — a rounding bug in money | `normal` | money: a subtle bug is costly, and worth more reading |
-| [#4](https://github.com/crissmoldovan/review-agent-demo/pull/4) `feat/session-rotation` — a security flaw | `thorough`, or `--multi` | security-critical, and every caller of the session is affected |
-| [#5](https://github.com/crissmoldovan/review-agent-demo/pull/5) `chore/bump-zod` — a version bump | none | nothing to review but a version. An App deployment and [your own server](self-hosting.md) skip it automatically, because every changed file is a release file. The CLI and the GitHub Actions workflow have no such rule — they review what they are pointed at — so do not ask |
-| [#6](https://github.com/crissmoldovan/review-agent-demo/pull/6) `feat/retry-backoff` — an off-by-one, then a fix | `basic`, then a re-review after the fix | the second posted review asks whether the first one's findings are still there ([re-reviews](post-as-yourself.md#6-review-again-after-a-change)) |
+| [#1](https://github.com/crissmoldovan/review-agent-demo/pull/7) `feat/order-notes` — no known problem | `basic` | small, local, easy to check. "No findings" is an answer: a well-formed empty list is a review that worked |
+| [#2](https://github.com/crissmoldovan/review-agent-demo/pull/8) `feat/currency-display` — a JPY formatting bug | `basic` | display code, local to one feature; [your first review](first-review.md) |
+| [#3](https://github.com/crissmoldovan/review-agent-demo/pull/9) `fix/refund-rounding` — a rounding bug in money | `normal` | money: a subtle bug is costly, and worth more reading |
+| [#4](https://github.com/crissmoldovan/review-agent-demo/pull/10) `feat/session-rotation` — a security flaw | `thorough`, or `--multi` | security-critical, and every caller of the session is affected |
+| [#5](https://github.com/crissmoldovan/review-agent-demo/pull/11) `chore/bump-zod` — a version bump | none | nothing to review but a version. An App deployment and [your own server](self-hosting.md) skip it automatically, because every changed file is a release file. The CLI and the GitHub Actions workflow have no such rule — they review what they are pointed at — so do not ask |
+| [#6](https://github.com/crissmoldovan/review-agent-demo/pull/12) `feat/retry-backoff` — an off-by-one, then a fix | `basic`, then a re-review after the fix | the second posted review asks whether the first one's findings are still there ([re-reviews](post-as-yourself.md#6-review-again-after-a-change)) |
 | a 4,000-line generated client, with a small hand-written wrapper | `basic`, with a brief pointing at the hand-written part | effort spent on generated code is wasted |
 
 For the last, the brief is a note to the reviewer — information that can point its attention, never a change to its
@@ -73,40 +73,40 @@ review-agent review --repo acme/widgets --pr 128 --brief "src/client/ is generat
 The commands below are the captured runs of the first four rows, the same in a POSIX shell and in PowerShell. Each
 prints the review, as [your first review](first-review.md#7-read-the-output) explains.
 
-### `basic`: pull request #2
+### `basic`: pull request #8
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 2
+review-agent review --repo crissmoldovan/review-agent-demo --pr 8
 ```
 
-<!-- capture: tier-basic-pr2-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 2` on macOS, full. The same run as first-review-pr2-stdout may be used. Version and date. -->
+<!-- capture: tier-basic-pr2-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 8` on macOS, full. The same run as first-review-pr2-stdout may be used. Version and date. -->
 *(captured output will appear here)*
 
-### `normal`: pull request #3
+### `normal`: pull request #9
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 3 --tier normal
+review-agent review --repo crissmoldovan/review-agent-demo --pr 9 --tier normal
 ```
 
-<!-- capture: tier-normal-pr3-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 3 --tier normal` on macOS, full. Version and date. -->
+<!-- capture: tier-normal-pr3-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 9 --tier normal` on macOS, full. Version and date. -->
 *(captured output will appear here)*
 
-### `thorough`: pull request #4
+### `thorough`: pull request #10
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 4 --tier thorough
+review-agent review --repo crissmoldovan/review-agent-demo --pr 10 --tier thorough
 ```
 
-<!-- capture: tier-thorough-pr4-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 4 --tier thorough` on macOS, full. This is the first measured `thorough` review: keep its cost line. Version and date. -->
+<!-- capture: tier-thorough-pr4-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 10 --tier thorough` on macOS, full. This is the first measured `thorough` review: keep its cost line. Version and date. -->
 *(captured output will appear here)*
 
-### Three focused reviewers: pull request #4
+### Three focused reviewers: pull request #10
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 4 --multi
+review-agent review --repo crissmoldovan/review-agent-demo --pr 10 --multi
 ```
 
-<!-- capture: tier-multi-pr4-output — stderr and stdout, in order, of `review-agent review --repo crissmoldovan/review-agent-demo --pr 4 --multi` (the default tier, basic) on macOS, full — stderr carries the "running 3 focused reviewers …" line and any reviewer that did not answer. The cost line is the three reviewers and the check pass together. Version and date. -->
+<!-- capture: tier-multi-pr4-output — stderr and stdout, in order, of `review-agent review --repo crissmoldovan/review-agent-demo --pr 10 --multi` (the default tier, basic) on macOS, full — stderr carries the "running 3 focused reviewers …" line and any reviewer that did not answer. The cost line is the three reviewers and the check pass together. Version and date. -->
 *(captured output will appear here)*
 
 <!-- capture: tier-measured-costs — after the four runs above: each one's cost line (total, check, seconds) in one list, with the review-agent and Claude Code versions and the date, to fill in "on the demo repository" figures in the tables of this guide. -->
@@ -174,7 +174,7 @@ on a machine of its own.
 - A request may **lower** the budget, never raise it:
 
   ```sh
-  review-agent review --repo crissmoldovan/review-agent-demo --pr 3 --tier normal --budget 1.50
+  review-agent review --repo crissmoldovan/review-agent-demo --pr 9 --tier normal --budget 1.50
   ```
 
   gives a $1.50 soft budget and a $3.75 ceiling. A value above the tier's is ignored: the CLI says

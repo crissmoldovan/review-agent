@@ -142,7 +142,7 @@ has the App's three values instead of `GITHUB_TOKEN`, runs `npm install --no-sav
   writes on stderr what it is about to post, and as whom — *"This will post as @review-bot on acme/widgets#128: a review
   with inline comments, a summary comment and a commit status "review-agent"."* — so the log shows it.
 
-<!-- capture: other-ci-bot-token-log — stdout and stderr, in order, of the two commands above run without a terminal (stdin from /dev/null) in a node:22-bookworm-slim container, against crissmoldovan/review-agent-demo pull request #1 (feat/order-notes, the clean one), with a bot account's fine-grained token as GITHUB_TOKEN. Replace the bot's login with @review-bot. Version and date. -->
+<!-- capture: other-ci-bot-token-log — stdout and stderr, in order, of the two commands above run without a terminal (stdin from /dev/null) in a node:22-bookworm-slim container, against crissmoldovan/review-agent-demo pull request #7 (feat/order-notes, the clean one), with a bot account's fine-grained token as GITHUB_TOKEN. Replace the bot's login with @review-bot. Version and date. -->
 *(captured output will appear here)*
 
 <!-- capture: other-ci-app-token-log — the same, with `node review-with-app.mjs` in place of the two commands and an App installation for the demo repository: it shows whether `GET /user` sent the review to a check run (the "reported with a check run: …" line). Version and date. -->

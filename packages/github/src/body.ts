@@ -48,7 +48,7 @@ export const inlineBody = (f: Finding, fence: string = SUGGESTION_FENCE): string
   const parts = [`**Severity ${f.severity}/10** · ${f.category}${focus}`, '', `**${f.title}**`, '', f.explanation]
   // Backticked, because evidence is `path:line` and Markdown would otherwise eat an underscore in a
   // filename. An empty list prints no heading at all: a heading over nothing reads as a bug.
-  if (f.evidence.length > 0) parts.push('', 'Evidence:', ...f.evidence.map((e) => `- \`${e}\``))
+  if (f.evidence.length > 0) parts.push('', 'Evidence:', ...f.evidence.map((e) => `- ${codeSpan(e)}`))
   const suggestion = f.suggestion === null ? '' : f.suggestion.replace(/\n$/, '')
   if (suggestion.trim() !== '') {
     parts.push('', suggestionFits(f)
@@ -282,6 +282,19 @@ export const MAX_NOTE_PATH_CHARS = 120
  *
  *  Backticks are REMOVED, not escaped: escaping inside a code span does nothing, and a longer fence
  *  is only another way out. Newlines go with them, so a note stays one paragraph. */
+/** One Markdown code span holding `s` exactly, whatever it contains (CommonMark §6.1): the fence is
+ *  one backtick longer than the longest run of backticks inside, and a space pads a span that starts
+ *  or ends with one. Evidence is the reviewer's own words and quotes code; wrapping it in single
+ *  backticks broke on the first backtick inside — measured on the first comment posted as a person
+ *  (demo pull request #12, 2026-10-15), where a `>` comparison quoted in backticks split the span. */
+export const codeSpan = (s: string): string => {
+  const flat = s.replace(/\r?\n+/g, ' ')
+  const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length))
+  const fence = '`'.repeat(longest + 1)
+  const pad = flat.startsWith('`') || flat.endsWith('`') ? ' ' : ''
+  return `${fence}${pad}${flat}${pad}${fence}`
+}
+
 export const inlineCode = (s: string): string => {
   const flat = s.replace(/[`\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
   if (flat === '') return '`(no file)`'

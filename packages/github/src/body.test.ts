@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Finding } from '@review-agent/core'
-import { MAX_SUGGESTION_LINES, SUGGESTION_FENCE, fenced, inlineBody, suggestionFits } from './body'
+import { MAX_SUGGESTION_LINES, SUGGESTION_FENCE, fenced, inlineBody, suggestionFits, codeSpan } from './body'
 
 const finding = (over: Partial<Finding> = {}): Finding => ({
   file: '.github/workflows/publish.yml', line: 100, endLine: null,
@@ -546,5 +546,30 @@ describe('reinstatementNote', () => {
     expect(REINSTATED_MARKER.includes(RETRACTED_MARKER)).toBe(false)
     expect(RETRACTED_MARKER.includes(REINSTATED_MARKER)).toBe(false)
     expect(note).not.toContain(RETRACTED_MARKER)
+  })
+})
+
+describe('codeSpan — evidence exactly as written, whatever it quotes (CommonMark §6.1)', () => {
+  it('keeps a plain path:line in single backticks, as before', () => {
+    expect(codeSpan('src/payments.ts:72')).toBe('`src/payments.ts:72`')
+  })
+
+  it('fences a span that quotes code in backticks with a longer run, so it stays one span', () => {
+    // The evidence that split on demo pull request #12 (2026-10-15).
+    const e = 'src/payments.ts:95-101 unbounded loop with `attempt > this.maxAttempts` guard'
+    expect(codeSpan(e)).toBe('``src/payments.ts:95-101 unbounded loop with `attempt > this.maxAttempts` guard``')
+  })
+
+  it('pads a span that starts or ends with a backtick, and flattens newlines', () => {
+    expect(codeSpan('`x`')).toBe('`` `x` ``')
+    expect(codeSpan('a\nb')).toBe('`a b`')
+  })
+
+  it('is what an inline comment uses for its evidence', () => {
+    const body = inlineBody({
+      file: 'src/a.ts', line: 1, endLine: null, severity: 5, category: 'correctness', title: 't',
+      explanation: 'e', evidence: ['src/a.ts:1 uses `x` here'], suggestion: null,
+    })
+    expect(body).toContain('- ``src/a.ts:1 uses `x` here``')
   })
 })

@@ -13,7 +13,7 @@ The pull request is #2 of the public demo repository
 requests carry known problems. #2, `feat/currency-display`, has a bug in how it formats Japanese yen (JPY). Whether
 the review finds it is what you are about to see: one review is a sample, not a verdict.
 
-<!-- capture: first-review-pr2-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 2` on macOS, full, with ANTHROPIC_API_KEY set and a `gh` login. Label it with the review-agent version, the Claude Code version and the date. The same run may serve as tier-basic-pr2-stdout. -->
+<!-- capture: first-review-pr2-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 8` on macOS, full, with ANTHROPIC_API_KEY set and a `gh` login. Label it with the review-agent version, the Claude Code version and the date. The same run may serve as tier-basic-pr2-stdout. -->
 *(captured output will appear here)*
 
 ## What you need
@@ -245,10 +245,10 @@ the demo repository.
 
 `doctor` exits `0` when nothing is `✗` and `2` otherwise. More: [troubleshooting](troubleshooting.md).
 
-## 6. Review demo pull request #2
+## 6. Review demo pull request #8
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 2
+review-agent review --repo crissmoldovan/review-agent-demo --pr 8
 ```
 
 The reviewer reads the pull request, downloads the repository at its head commit — as an archive, with
@@ -323,7 +323,7 @@ Progress notes stay on stderr, so stdout always parses.
 **This runs the review again, and pays for it again** — and, one review being a sample, it may not find the same things.
 
 ```sh
-review-agent review --repo crissmoldovan/review-agent-demo --pr 2 --json > review.json
+review-agent review --repo crissmoldovan/review-agent-demo --pr 8 --json > review.json
 jq '.costUsd' review.json
 jq -r '.output.findings[] | "\(.severity)/10 \(.file):\(.line) \(.title)"' review.json
 jq -r '.checkVerdicts[]? | "#\(.index) \(.verdict) at \(.severity)/10"' review.json
@@ -334,7 +334,7 @@ the CLI's output as UTF-8, which it otherwise does not on Windows:
 
 ```powershell
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$review = review-agent review --repo crissmoldovan/review-agent-demo --pr 2 --json | Out-String | ConvertFrom-Json
+$review = review-agent review --repo crissmoldovan/review-agent-demo --pr 8 --json | Out-String | ConvertFrom-Json
 $review.costUsd
 $review.output.findings | ForEach-Object { "$($_.severity)/10 $($_.file):$($_.line) $($_.title)" }
 $review.checkVerdicts | ForEach-Object { "#$($_.index) $($_.verdict) at $($_.severity)/10" }
@@ -353,7 +353,7 @@ The fields you will read most:
 
 `output` is `null` when the model produced nothing usable.
 
-<!-- capture: first-review-pr2-json — the output of the three jq commands above for one `--json` run of PR #2 on macOS, and the same three PowerShell lines' output on Windows if run there. Version and date. -->
+<!-- capture: first-review-pr2-json — the output of the three jq commands above for one `--json` run of PR #8 on macOS, and the same three PowerShell lines' output on Windows if run there. Version and date. -->
 *(captured output will appear here)*
 
 ## What it costs
