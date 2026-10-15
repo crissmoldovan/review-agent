@@ -66,12 +66,12 @@ of a deployment behind a Vercel login, which GitHub cannot pass
 ([Deployment Protection](https://vercel.com/docs/deployment-protection), checked 2026-10-15).
 
 ```sh
-npx @review-agent/cli@0.2.3 init --name "Acme Reviewer" --url https://example.com \
+npx @review-agent/cli@0.2.4 init --name "Acme Reviewer" --url https://example.com \
   --webhook-url https://reviewer-acme.vercel.app/api/github/webhook --org acme
 ```
 
 ```powershell
-npx @review-agent/cli@0.2.3 init --name "Acme Reviewer" --url https://example.com `
+npx @review-agent/cli@0.2.4 init --name "Acme Reviewer" --url https://example.com `
   --webhook-url https://reviewer-acme.vercel.app/api/github/webhook --org acme
 ```
 
@@ -138,7 +138,7 @@ Last, the key the route will trigger with: in the same **Production** environmen
 In the Next.js project:
 
 ```sh
-npm install @review-agent/app@0.2.3 @review-agent/core@0.2.3 @trigger.dev/sdk
+npm install @review-agent/app@0.2.4 @review-agent/core@0.2.4 @trigger.dev/sdk
 ```
 
 Then the route, at `app/api/github/webhook/route.ts` (or `src/app/api/github/webhook/route.ts` if the project keeps its

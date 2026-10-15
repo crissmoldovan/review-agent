@@ -212,7 +212,7 @@ When a pull request that has been reviewed is reviewed again (by `/review` or **
 A comment is only ever appended to, never deleted, and only the reviewer's own comments on this pull request are
 edited. `cannot-tell`, or no answer, leaves a finding as it was.
 
-A problem the new review finds again is **said once**, on the comment that first reported it. The check pass is shown
+A problem the new review finds again is **said once**, on the earlier comment that reports it. The check pass is shown
 the earlier inline comments still open and says which new finding describes the same defect, however it is now
 worded. Such a finding gets no new comment: its earlier comment gets **"Still present"** with the commit it was found
 at — once per commit, however often that commit is reviewed — and the summary lists it under **Still present** with a
@@ -222,6 +222,21 @@ This needs the [check pass](how-it-works.md#the-check-pass), and applies only to
 marked "No longer reported": a finding that repeats a comment someone replied `/dispute` or `/defer` to is posted as
 a new comment, as are all findings when the check pass is skipped. Low findings (below 4) are held back on later
 reviews as before, unless the deployment sets `report.repeatNits`.
+
+What it looks like, on the demo repository's pull request
+[#14](https://github.com/crissmoldovan/review-agent-demo/pull/14), reviewed again at the same commit. The earlier
+comment, with the note at its end:
+
+![An inline comment by github-actions (Bot), marked edited, on src/format.ts line 16: "Severity 7/10 · correctness", "formatMoney divides every currency by 100, breaking JPY (0 minor units)", the explanation, the evidence and a suggested change, and under a rule at the end: "Still present at c85133f: a later review found this issue again, and says so here rather than in a new comment."](guides/images/pr14-still-present-comment.png)
+
+and the summary, where it is listed with a link to that comment:
+
+![The summary comment by github-actions (Bot): the automated-review line ($0.30 at per-token API prices), "Review of c85133f", the reviewer's summary, "Intent: partial", and a "Still present" section: "Found again at this commit, and noted on the comment that first reported each, rather than posted again:" followed by "7/10 src/format.ts:16 — formatMoney divides by 100 for every currency, so JPY is wrong — the earlier comment", linked.](guides/images/pr14-still-present-summary.png)
+
+*Screenshots 2026-10-15 · review-agent 0.2.3, from the [GitHub Actions workflow](guides/github-actions.md) · a
+`/review` comment · $0.30 model spend at per-token API prices.* No new inline comment was posted. The pull request
+already carried the defect twice — 0.2.2 had posted it again — and the link went to the second of the two, which is
+why the sentence no longer says "first" from 0.2.4: it reads *"noted on the earlier comment about each"*.
 
 This pass costs extra: its own target is a quarter of the review's soft budget, and its own ceiling 2.5 times that —
 $0.50 and $1.25 on `basic` ([budgets](configuration.md#budgets)) — and it runs only when that ceiling still fits under

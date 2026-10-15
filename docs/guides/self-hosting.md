@@ -38,12 +38,12 @@ Register a GitHub App whose webhook points at the address the server will have. 
 permissions and events the App asks for: [the GitHub App](../github-app.md#permissions-and-events).
 
 ```sh
-npx @review-agent/cli@0.2.3 init --name "Acme Reviewer" --url https://example.com \
+npx @review-agent/cli@0.2.4 init --name "Acme Reviewer" --url https://example.com \
   --webhook-url https://reviewer.example.com/api/github/webhook --org acme
 ```
 
 ```powershell
-npx @review-agent/cli@0.2.3 init --name "Acme Reviewer" --url https://example.com `
+npx @review-agent/cli@0.2.4 init --name "Acme Reviewer" --url https://example.com `
   --webhook-url https://reviewer.example.com/api/github/webhook --org acme
 ```
 

@@ -3,6 +3,15 @@
 All five packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app`, `@review-agent/cli` and
 `@review-agent/sdk` — are released together, at the same version (the SDK from 0.2.0).
 
+## 0.2.4 — 2026-10-15
+
+- **"Still present" ran for real** on the demo repository: a third `/review` of an unchanged pull request posted no
+  new comment, noted the earlier one, and listed the finding under **Still present** with a working link
+  ([what it looks like](docs/pull-requests.md#re-reviews)).
+- **The summary no longer says "first reported".** A pull request reviewed before 0.2.3 can carry one defect on two
+  comments, and the check pass links whichever it matched — on the demo, the second of two. The line now reads
+  *"noted on the earlier comment about each"*.
+
 ## 0.2.3 — 2026-10-15
 
 - **A problem found again is said once, on the comment that first reported it.** Each review used to post every

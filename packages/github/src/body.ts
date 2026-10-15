@@ -222,12 +222,14 @@ export const summaryBody = (a: SummaryInput): string => {
     }
   }
   // Criss, 2026-10-15: a defect an earlier review reported and this one found again is said once, on
-  // the comment that first reported it. Listed here so the summary still names everything this review
+  // the earlier comment that reports it. Not "first": a pull request reviewed before 0.2.3 can carry
+  // one defect on two comments, and the check pass names whichever it matched — measured on the demo's
+  // pull request #14, where the link went to the second of two. Listed here so the summary still names everything this review
   // found, with the way to that comment: `#discussion_r<id>` is the id GitHub gives an inline comment
   // on the pull request's own page (checked 2026-10-15), so the link works on any GitHub host.
   if ((a.stillPresent ?? []).length > 0) {
     lines.push('', '#### Still present', '',
-      'Found again at this commit, and noted on the comment that first reported each, rather than posted again:', '')
+      'Found again at this commit, and noted on the earlier comment about each rather than posted again:', '')
     for (const { finding: f, commentId } of a.stillPresent ?? []) {
       lines.push(`- **${f.severity}/10** \`${f.file}:${f.line}\` — **${f.title}** — [the earlier comment](#discussion_r${commentId})`)
     }

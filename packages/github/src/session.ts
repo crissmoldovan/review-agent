@@ -628,7 +628,7 @@ export async function runReviewSession(a: {
       confirmed: published.confirmed,
       cutShort: review.result.cutShort,
       // Inline, summary-only and found again: a finding said only in the summary was still said, and
-      // so was one noted as still present on the comment that first reported it.
+      // so was one noted as still present on the earlier comment that reports it.
       posted: published.counts.inline + published.counts.summaryOnly + published.counts.repeated,
       // GitHub's own link to the summary, now that it hands one back (spec 0.2.0 §14.2).
       summaryUrl: published.summaryUrl,

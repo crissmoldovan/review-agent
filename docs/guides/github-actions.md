@@ -56,20 +56,20 @@ it — it runs with your API key. From the root of a clone of your repository:
 
 ```sh
 mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.3/examples/github-actions/review.yml \
+curl -fsSL https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.4/examples/github-actions/review.yml \
   -o .github/workflows/review-agent.yml
 ```
 
 ```powershell
 New-Item -ItemType Directory -Force .github/workflows | Out-Null
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.3/examples/github-actions/review.yml `
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.4/examples/github-actions/review.yml `
   -OutFile .github/workflows/review-agent.yml
 ```
 
 The file pins two versions. Keep both pinned, and change them on purpose:
 
 - `@anthropic-ai/claude-code@2.1.258` — the Claude Code the reviewer's flags were measured against;
-- `@review-agent/cli@0.2.3` — the reviewer.
+- `@review-agent/cli@0.2.4` — the reviewer.
 
 ## 3. Open a pull request
 
@@ -214,7 +214,8 @@ What it shows:
   marked "No longer reported".
 - **0.2.2 posted a problem still in the code again.** The JPY finding went up as a second inline comment on the same
   line, under the new review's wording. From 0.2.3 a finding the check pass links to an earlier comment is said on
-  that comment instead, as **Still present** ([re-reviews](../pull-requests.md#re-reviews)).
+  that comment instead, as **Still present**: a third `/review` of the same commit, at 0.2.3, posted no new comment
+  and noted the earlier one ([what it looks like](../pull-requests.md#re-reviews)).
 
 ## Pull requests from forks
 
@@ -270,7 +271,7 @@ different things on two runs of the same pull request.
 
 ## Upgrading
 
-Change `@review-agent/cli@0.2.3` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
+Change `@review-agent/cli@0.2.4` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
 a pull request — it is reviewed by the new version. Change `@anthropic-ai/claude-code@2.1.258` only when a release of
 the reviewer says to.
 

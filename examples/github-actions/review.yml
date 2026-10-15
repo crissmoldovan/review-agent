@@ -145,7 +145,7 @@ jobs:
       - name: Install Claude Code and review-agent
         if: steps.gate.outputs.review == 'true'
         run: |
-          npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.3
+          npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.4
           claude --version
           review-agent --version
 

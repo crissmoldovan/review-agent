@@ -37,7 +37,7 @@ export type PublishCounts = {
    *  the re-review pass now says is still there, or that a person has disputed. 0 on almost every
    *  review, and above 0 exactly when an earlier review was wrong in public. */
   reinstated: number
-  /** Findings this review found again and said once, on the earlier comment that first reported
+  /** Findings this review found again and said once, on the earlier comment that reports
    *  them, rather than in a new comment (Criss, 2026-10-15). Listed in the summary. 0 on a first
    *  review, without the check pass, and in every mode but `inline+summary`. */
   repeated: number

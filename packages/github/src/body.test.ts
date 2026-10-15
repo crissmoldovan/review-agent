@@ -601,6 +601,9 @@ describe('summaryBody: what was found again', () => {
     const body = summaryBody({ ...base, stillPresent: [{ finding: f, commentId: 4279876144 }] })
     expect(body).toContain('#### Still present')
     expect(body).toContain('- **7/10** `src/format.ts:16` — **JPY is 100x wrong** — [the earlier comment](#discussion_r4279876144)')
+    // Not "the comment that first reported it": a pull request reviewed before 0.2.3 can hold one defect
+    // on two comments, and the link goes to whichever the check pass matched (demo pull request #14).
+    expect(body).not.toMatch(/first report/i)
   })
   it('has no such section when nothing was found again', () => {
     expect(summaryBody(base)).not.toContain('Still present')
