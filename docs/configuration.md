@@ -61,7 +61,7 @@ A tier is a named preset. A request picks one; the default is `basic`. When to a
 |---|---|---|---|---|---|
 | `basic` | `low` | on | $2.00 | $5.00 | where every automatic review and a bare `/review` land |
 | `normal` | `medium` | on | $3.00 | $7.50 | |
-| `thorough` | `high` | on | $8.00 | $20.00 | one reviewer at `high` effort, in the App and the CLI alike (since 0.2.0). Not measured yet |
+| `thorough` | `high` | on | $8.00 | $20.00 | one reviewer at `high` effort, in the App and the CLI alike (since 0.2.0). Measured $0.62–0.89 on the demo's small pull requests (2026-10-15, per-token API prices) |
 
 All figures are at **per-token API prices** — what an Anthropic API key would be billed. With a subscription token the
 same amounts are drawn from the subscription's allowance instead.
@@ -94,7 +94,7 @@ Their findings are combined into one review. A request asks for it with `--multi
 
 **When to use it.** A change that is both risky and wide — it touches several areas, or is the kind where one reviewer
 tends to spend its whole budget on one sort of problem. Not by default: it costs roughly three reviews, plus the check
-pass. Its cost is **not measured yet** on this release. The one trial before it — three focused `claude-opus-5`
+pass. Measured on this release: $0.67–0.72 for a whole `--multi` review, check pass included (measured 2026-10-15 on the demo's small pull requests, at per-token API prices; [the runs](guides/choosing-a-tier.md)). The one trial before it — three focused `claude-opus-5`
 reviewers and a check pass, at per-token API prices, measured on 2026-09-12 — went like this: on one pull request two
 reviewers finished and found 7 findings for $2.84, and $2.10 was lost on the third; on another all three were stopped
 by the ceiling and returned nothing, $5.91. This mode is built so that a stopped reviewer's work counts and one

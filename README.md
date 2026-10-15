@@ -32,7 +32,7 @@ The retry logic moved into the client. Check every caller still handles a 429.
   runs.
 - **Proven on real code:** read-only reviews of real pull requests for cost and quality measurement, and reviews
   posted to a real pull request through the deployed runner.
-- **New in 0.2.0, run for real once each** on the [demo repository](https://github.com/crissmoldovan/review-agent-demo)
+- **New in 0.2.0, run for real** (once or twice each) on the [demo repository](https://github.com/crissmoldovan/review-agent-demo)
   (2026-10-15): posting from the CLI as yourself (`review-agent review --post`, with a commit status), the
   [multi-reviewer mode](docs/configuration.md#the-multi-reviewer-mode) (`--multi`: three focused reviewers, one check
   pass that also merges duplicates), the `thorough` tier, and the [re-review pass](docs/pull-requests.md#re-reviews),

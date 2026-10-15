@@ -98,8 +98,9 @@ review-agent review --repo <owner/name> --pr <number> [options]
 Notes:
 
 - `--tier thorough` is one reviewer at `high` effort with an $8 soft budget ($20 ceiling), here and in the App. Its
-  cost is not measured yet. `--multi` runs three reviewers, each with the tier's budget and its own ceiling — up to
-  three times the tier's ceiling between them; its cost is not measured yet either.
+  cost was $0.62–0.89 (measured 2026-10-15 on the demo's small pull requests, at per-token API prices; [the measured runs](guides/choosing-a-tier.md)). `--multi` runs three
+  reviewers, each with the tier's budget and its own ceiling — up to three times the tier's ceiling between them; it
+  cost $0.67–0.72 on the same pull requests.
 - The CLI uses the [built-in defaults](configuration.md#deployment-settings) and reads no configuration file of its
   own. It **does** read the reviewed repository's [`.review-agent/review.md`](configuration.md#the-repository-file)
   from the pull request's **base** branch, as the App does — so a repository can make the review quieter

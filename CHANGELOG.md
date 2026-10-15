@@ -3,9 +3,38 @@
 All five packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app`, `@review-agent/cli` and
 `@review-agent/sdk` — are released together, at the same version (the SDK from 0.2.0).
 
-## Unreleased (0.2.0)
+## 0.2.0 — 2026-10-15
 
-### Stage 1 — the engine: credentials, the Claude binary, platforms
+**Three ways in, one review.** The reviewer now runs the same review session whichever way it is asked: the **GitHub
+App** (as before), the **CLI** — which can now **post as you**, using your GitHub CLI login — and a new **SDK**,
+`@review-agent/sdk`, that you embed and pass your own keys to. Plus a **multi-reviewer mode** (`--multi`), a
+`thorough` tier that works everywhere, **Windows** support tested in CI, and task-by-task [guides](docs/guides/README.md)
+built from real captured reviews of a [public demo repository](https://github.com/crissmoldovan/review-agent-demo).
+The design is in [docs/specs/0.2.0-ways-in.md](docs/specs/0.2.0-ways-in.md).
+
+**Run for real before this release** (2026-10-15, on the demo repository, model spend at per-token API prices):
+`basic`, `normal` and `thorough` reviews; a `--multi` review; posting as yourself with a commit status; and the
+**re-review pass**, for the first time against a live model — a repair that wrapped the faulty line was judged
+resolved and its comment marked "No longer reported". The real Claude Code runs on Linux, macOS and Windows in CI at $0.
+**Not yet run for real:** the SDK (unit tests with a fake Claude only) and the App's new child task per reviewer on
+trigger.dev.
+
+**Upgrading**
+- **An App deployment:** redeploy the runner; nothing to reconfigure. A new task, `review-agent-focus`, registers itself
+  for multi-reviewer reviews. Check runs now link to the summary comment, and every summary opens with an
+  automated-review line.
+- **The CLI:** `--post` now posts (it was refused). With **both** `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`
+  set it now refuses (exit 2). Exit `4` is new: reviewed and paid for, but posting failed. On npm 12, install Claude Code
+  with `npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code`.
+- **The library:** `octokitFor`, `pushAccessOf`, `refuseUnbuilt` and the Re-run settings codec moved to
+  `@review-agent/github`; the App's receiver still exports its names. The record and the callback envelope stay
+  `version 1` (new fields only).
+
+**Found by the real captures, and fixed before release:** a `--multi` review printed by the CLI listed duplicates the
+check pass had already merged; and an inline comment's evidence broke into pieces when it quoted code in backticks.
+
+
+### The engine: credentials, the Claude binary, platforms
 
 - **The CLI refuses two model credentials.** With both `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` set,
   `review-agent review` now exits `2`, as the App's runner always has, so a review is billed to an account you can
@@ -37,9 +66,9 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
 - **Ctrl-C stops a CLI review** and the Claude process with it, and deletes the downloaded code; a second Ctrl-C
   exits at once with `130`.
 
-### Stage 2 — one review session
+### One review session
 
-- **`thorough` works everywhere.** It is one reviewer at `high` effort ($8 soft budget, $20 ceiling, not yet measured)
+- **`thorough` works everywhere.** It is one reviewer at `high` effort ($8 soft budget, $20 ceiling; measured $0.62–0.89 on the demo's small pull requests)
   in the App as in the CLI: a `/review --tier thorough` and a Re-run that carries it are honoured, where both used to
   be refused. Its preset says `agents: 1`, so its record no longer says `multi: true`. `--multi` is still refused and
   named in the summary until the multi-reviewer mode is built.
@@ -66,13 +95,13 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
   too. `upsertSummaryComment`, `publishReview` and `createCheckRun` also hand back GitHub's link to what they wrote.
   `THOROUGH_REFUSED` is deprecated.
 
-### Stage 3 — the multi-reviewer mode
+### The multi-reviewer mode
 
 - **`/review --multi` runs three focused reviewers** — `intent`, `impact` and `security` — instead of one, with any
   tier: `--multi --tier normal` is three reviewers at `medium` effort. Each has the tier's soft budget and its own
   ceiling (so up to three times the tier's ceiling between them), keeps what it wrote if its ceiling stops it, and
   does not take the others down if it fails: the review is unfinished only when none of the three produced anything.
-  Its cost is not measured yet.
+  Measured: $0.67–0.72 a review on the demo's small pull requests, check pass included, at per-token API prices.
 - **One check pass over all their findings, which also merges duplicates.** It is asked which findings repeat an
   earlier one; a duplicate is not posted, like a refuted finding, and stays on the record. Its budget is a quarter of
   the tier's target for each reviewer that reported a finding. With the check pass off nothing is merged, and the
@@ -94,7 +123,7 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
   The CLI has no `--multi` flag yet.
 - **A multi-reviewer re-review** fits its re-review pass under the three reviewers' ceilings together, not one.
 
-### Stage 4 — the CLI
+### The CLI
 
 - **`review-agent review --post` posts**, as whoever the GitHub token belongs to: the review with its inline comments,
   the summary comment, and a report on the commit. At a terminal it first says once what it will post and as whom —
@@ -129,7 +158,11 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
 - **Library:** core exports `resolveClaudeBinary`; `tokenIdentityOf` keeps a classic token's scope names
   (`scopes`); `ReviewVia`'s `cli` kind takes `from: 'command-line' | 'github-actions'`.
 
-### Stage 5 — the SDK: `@review-agent/sdk`
+- **A `--multi` review prints each duplicate once**, naming the other reviewers that found it ("also found by
+  security") and how many were merged; `--json` keeps them all. An inline comment's evidence renders as one code span
+  whatever it quotes.
+
+### The SDK: `@review-agent/sdk`
 
 - **A new package, `@review-agent/sdk`: the review as one call.** `reviewPullRequest({ repo, pr, github, credential, post, … })`
   runs the same review session as the App and the CLI and returns `reviewed`, `unfinished`, `refused` or `failed` —
@@ -144,7 +177,7 @@ All five packages — `@review-agent/core`, `@review-agent/github`, `@review-age
 - Concurrent reviews in one process share nothing but the skill cache, and every checkout is removed when its review
   ends. The SDK does not depend on `@review-agent/app`, so it never installs trigger.dev.
 
-### Stage 6 — the App on the review session
+### The App on the review session
 
 - **The App's runner runs the review session** (`prepareReview`, `runReviewSession` with a check-run reporter), so the
   App, the CLI and the SDK review identically. What stays the runner's own: the token for one repository, the
@@ -182,7 +215,7 @@ trigger key and the record callback are as they were. The new `review-agent-focu
 deploy, and only the runner starts it. A deployment that edited `runnerDeployment()` re-applies that edit, as on
 every upgrade.
 
-### Stage 7 — examples
+### Examples
 
 - **Run it on your own server.** `examples/server` is the receiver, an in-process queue and the SDK in one Node.js 22
   process, posting as your App with no trigger.dev: bounded, deduplicated on the receiver's idempotency key, one
@@ -199,7 +232,7 @@ every upgrade.
   are now stamped by the shared review session, so the CLI's, the SDK's and the self-hosted server's check runs carry
   them as the App's always did (`encodeRequestRefinement` moved to `@review-agent/github`; the App still exports it).
 
-### Stage 8 — continuous integration
+### Continuous integration
 
 - **Windows is required** on every pull request, beside Linux (Node 22 and 24) and macOS, and an **Alpine** job runs
   the suite on musl.
