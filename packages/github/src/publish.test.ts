@@ -4,15 +4,15 @@ import { join } from 'node:path'
 import type { Octokit } from '@octokit/core'
 import {
   buildReviewRecord, combineFocusRuns, defaultDeploymentConfig, resolveSettings,
-  type CheckVerdict, type EngineFailure, type EngineResult, type Finding, type FocusRun, type RecheckSkipped,
+  type CheckVerdict, type EngineFailure, type EngineResult, type Finding, type FocusRun, type PreviousFinding, type RecheckSkipped,
   type RecheckState, type ReportMode, type ReviewOutput, type ReviewRequest, type Usage,
 } from '@review-agent/core'
 import { describe, expect, it } from 'vitest'
 import {
-  commentIdsIn, decodeMarker, encodeMarker, findingId, recheckQuestions, type MarkerState,
+  commentIdsIn, decodeMarker, encodeMarker, findingId, recheckQuestions, repeatCandidates, type MarkerState,
 } from './marker'
 import type { PullRequestContext } from './pr'
-import type { ReviewVia } from './body'
+import { stillPresentMarker, type ReviewVia } from './body'
 import { publishReview } from './publish'
 import type { RecheckResult, RunReviewResult } from './run-review'
 
@@ -125,6 +125,8 @@ const answeredNothing = (marker: MarkerState | null, skipped: RecheckSkipped): R
 const reviewed = (over: {
   findings?: Finding[]; output?: ReviewOutput | null; failure?: EngineFailure | null
   verdicts?: CheckVerdict[]; mode?: ReportMode; recheck?: RecheckResult | null
+  /** The earlier findings the check pass was shown, for `repeats` (Criss, 2026-10-15). */
+  earlier?: PreviousFinding[]
 } = {}): RunReviewResult => {
   const deployment = defaultDeploymentConfig()
   if (over.mode !== undefined) deployment.report.mode = over.mode
@@ -134,7 +136,8 @@ const reviewed = (over: {
     output: out, usage: USAGE, cutShort: over.failure?.kind === 'budget', wrapUpFired: false,
     failure: over.failure ?? null,
   }
-  const check = over.verdicts === undefined ? null : { verdicts: over.verdicts, usage: CHECK_USAGE }
+  const check = over.verdicts === undefined ? null
+    : { verdicts: over.verdicts, usage: CHECK_USAGE, ...(over.earlier !== undefined && { earlier: over.earlier }) }
   const recheck = over.recheck ?? null
   const record = buildReviewRecord({
     request: REQUEST, settings, result, skills: [], check, recheck, removedFromCheckout: [],
@@ -1622,5 +1625,118 @@ describe('publishReview: retracting the comment of a finding judged resolved', (
     await publishWith(gh.octokit, reviewed({ findings: [], recheck: said(state, 'resolved') }), state)
     expect(recheckQuestions(state).questions[0].file).toBe('./src/release.ts')
     expect(String(only(gh.calls, RETRACT_EDIT)[0].params.body)).toContain('`./src/release.ts`')
+  })
+})
+
+// Criss, 2026-10-15: a later review's finding that the check pass says repeats an inline comment an
+// earlier review left open is not posted again. It is listed in the summary as still present, and the
+// earlier comment is told so. Measured before: a second /review of an unchanged commit put the same
+// defect up twice, on one line, in two wordings (the demo repository's pull request #14).
+describe('publishReview: a defect found again is said on the comment that first reported it', () => {
+  // The earlier review said INLINE's defect in other words, on comment 4001.
+  const EARLIER_TITLE = 'any branch can publish by pushing a tag'
+  const earlierState: MarkerState = {
+    version: 1,
+    runs: [{
+      headSha: OLD_SHA, at: '2026-09-13T10:00:00.000Z',
+      findings: [{
+        id: findingId({ ...INLINE, title: EARLIER_TITLE }), file: INLINE.file, line: 100, severity: 6,
+        category: 'security', title: EARLIER_TITLE, commentId: 4001, outcome: 'open',
+      }],
+    }],
+  }
+  const comment4001 = (body = '**Severity 6/10** · security\n\n**any branch can publish by pushing a tag**'): ReviewCommentOnWire => ({
+    id: 4001, path: INLINE.file, line: 100, body, pull_request_review_id: 600, in_reply_to_id: null, user: BOT,
+  })
+  const v = (index: number, over: Partial<CheckVerdict> = {}): CheckVerdict =>
+    ({ index, verdict: 'confirmed', severity: 6, reason: 'r', evidence: [], ...over })
+  const offered = repeatCandidates(earlierState).questions
+  const again = (over: { verdicts?: CheckVerdict[]; earlier?: PreviousFinding[]; recheck?: RecheckResult; mode?: ReportMode } = {}) =>
+    reviewed({
+      findings: [INLINE, ELSEWHERE],
+      verdicts: over.verdicts ?? [v(0, { repeats: 0 }), v(1, { severity: 7, repeats: null })],
+      earlier: over.earlier ?? offered,
+      ...(over.recheck !== undefined && { recheck: over.recheck }),
+      ...(over.mode !== undefined && { mode: over.mode }),
+    })
+  const github = (body?: string) => fakeGitHub({ issueComments: [previousSummary(earlierState)], reviewComments: [comment4001(body)] })
+
+  it('posts no new comment for it, lists it as still present with a link, and notes the earlier comment', async () => {
+    const gh = github()
+    const out = await publishWith(gh.octokit, again(), earlierState)
+
+    // INLINE was the only finding for a line: no review is posted at all.
+    expect(only(gh.calls, REVIEW_CREATE)).toEqual([])
+    const summary = String(only(gh.calls, SUMMARY_EDIT)[0].params.body)
+    expect(summary).toContain('#### Still present')
+    expect(summary).toContain(`**${INLINE.title}** — [the earlier comment](#discussion_r4001)`)
+    // ELSEWHERE is new, and is said where it always was.
+    expect(summary).toContain('#### Not placed inline')
+    const edits = only(gh.calls, RETRACT_EDIT)
+    expect(edits.map((c) => c.params.comment_id)).toEqual([4001])
+    const body = String(edits[0].params.body)
+    expect(body.startsWith(comment4001().body)).toBe(true)           // appended, never replaced
+    expect(body).toContain('**Still present** at `4f8e2a1`')
+    expect(body).toContain(stillPresentMarker(HEAD_SHA))
+    // The new run's row carries the EARLIER comment: a reply there is about this defect too.
+    const row = out.marker.runs.at(-1)?.findings.find((f) => f.title === INLINE.title)
+    expect(row).toMatchObject({ commentId: 4001, outcome: 'open' })
+    expect(out.counts).toMatchObject({ inline: 0, summaryOnly: 1, repeated: 1, stillPresentNoted: 1, retractionsWithheld: 0 })
+    // Still a finding this review reports: the gate and the check run count it.
+    expect(out.findings.map((f) => f.title)).toEqual([ELSEWHERE.title, INLINE.title])
+  })
+
+  it('notes a comment once per commit, however many times that commit is reviewed', async () => {
+    const gh = github(`${comment4001().body}\n\n---\n${stillPresentMarker(HEAD_SHA)}\n**Still present** at \`4f8e2a1\`: …`)
+    const out = await publishWith(gh.octokit, again(), earlierState)
+    expect(only(gh.calls, RETRACT_EDIT)).toEqual([])
+    expect(out.counts).toMatchObject({ repeated: 1, stillPresentNoted: 0, retractionsWithheld: 0 })
+  })
+
+  it('does not let the re-review pass call it gone in the same breath', async () => {
+    // The re-review pass answers "resolved" about comment 4001's row while the check pass says this
+    // review found that defect again. The comment is not retracted, and its row stays open.
+    const gh = github()
+    const out = await publishWith(gh.octokit, again({ recheck: said(earlierState, 'resolved') }), earlierState)
+    const bodies = only(gh.calls, RETRACT_EDIT).map((c) => String(c.params.body))
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toContain('**Still present**')
+    expect(bodies[0]).not.toContain('No longer reported')
+    expect(out.marker.runs[0].findings[0].outcome).toBe('open')
+  })
+
+  it('acts on no repeats when the pass was shown a different list than this marker gives', async () => {
+    const shifted: PreviousFinding[] = [{ ...offered[0], title: 'some other finding' }]
+    const gh = github()
+    const out = await publishWith(gh.octokit, again({ earlier: shifted }), earlierState)
+    // Posted as a new comment, as before this change, and the earlier comment is left alone.
+    expect(only(gh.calls, REVIEW_CREATE)).toHaveLength(1)
+    expect(only(gh.calls, RETRACT_EDIT)).toEqual([])
+    expect(out.counts).toMatchObject({ inline: 1, repeated: 0, stillPresentNoted: 0 })
+  })
+
+  it('says nothing on the earlier comment for a finding the check pass refuted', async () => {
+    const gh = github()
+    const out = await publishWith(gh.octokit,
+      again({ verdicts: [v(0, { verdict: 'refuted', severity: 2, repeats: 0 }), v(1, { severity: 7, repeats: null })] }), earlierState)
+    expect(only(gh.calls, RETRACT_EDIT)).toEqual([])
+    expect(String(only(gh.calls, SUMMARY_EDIT)[0].params.body)).not.toContain('Still present')
+    expect(out.counts).toMatchObject({ repeated: 0, suppressed: 1 })
+  })
+
+  it('routes nothing in a mode that posts no inline comments', async () => {
+    const gh = github()
+    const out = await publishWith(gh.octokit, again({ mode: 'summary-only' }), earlierState)
+    expect(only(gh.calls, RETRACT_EDIT)).toEqual([])
+    expect(String(only(gh.calls, SUMMARY_EDIT)[0].params.body)).not.toContain('Still present')
+    expect(out.counts).toMatchObject({ summaryOnly: 2, repeated: 0 })
+  })
+
+  it('tells a comment that stands retracted that the defect is back, rather than "still present"', async () => {
+    const gh = github(`${comment4001().body}\n\n---\n<!-- review-agent:retracted -->\n**No longer reported.** …`)
+    await publishWith(gh.octokit, again(), earlierState)
+    const body = String(only(gh.calls, RETRACT_EDIT)[0].params.body)
+    expect(body).toContain('**Reported again.**')
+    expect(body).toContain(stillPresentMarker(HEAD_SHA))
   })
 })

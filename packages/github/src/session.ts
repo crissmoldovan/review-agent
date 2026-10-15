@@ -10,7 +10,7 @@ import {
   checkRunWanted, gateOf, verdictJson, type CheckConclusion, type CheckOutcome,
 } from './check-run'
 import { removeCheckout } from './checkout'
-import { recheckQuestions, type MarkerState } from './marker'
+import { recheckQuestions, repeatCandidates, type MarkerState } from './marker'
 import { fetchPullRequest as fetchPullRequestLive, type PullRequestContext } from './pr'
 import { findSummaryComment as findSummaryCommentLive, type FoundSummary } from './post'
 import { publishReview as publishReviewLive, type PublishedReview } from './publish'
@@ -98,11 +98,16 @@ export type PostedComment = { findingId: string; file: string; line: number; com
  *  and the last one for this head sha is the one this review appended — an earlier review's comments
  *  belong to that review's record, and a reply under one of them is about that review. A finding
  *  with no comment id — summary-only, or an inline comment GitHub refused — has nothing a reply
- *  could hang off, and is left out. */
-export const postedCommentsOf = (published: { headSha: string; marker: MarkerState }): PostedComment[] => {
+ *  could hang off, and is left out. So is a finding found again (`said.repeated`, Criss, 2026-10-15):
+ *  its row carries the earlier review's comment, which this review noted and did not post. */
+export const postedCommentsOf = (
+  published: { headSha: string; marker: MarkerState; said?: { repeated?: { commentId: number }[] } },
+): PostedComment[] => {
   const run = [...published.marker.runs].reverse().find((r) => r.headSha === published.headSha)
+  const noted = new Set((published.said?.repeated ?? []).map((r) => r.commentId))
   return (run?.findings ?? []).flatMap((f) =>
-    f.commentId === null ? [] : [{ findingId: f.id, file: f.file, line: f.line, commentId: f.commentId }])
+    f.commentId === null || noted.has(f.commentId)
+      ? [] : [{ findingId: f.id, file: f.file, line: f.line, commentId: f.commentId }])
 }
 
 /** 30 minutes: six times the slowest review ever measured (4m40s, design §8). Not a performance
@@ -506,12 +511,16 @@ export async function runReviewSession(a: {
     const previousFindings = existing === undefined || a.reReview === false
       ? []
       : recheckQuestions(existing?.marker ?? null).questions
+    // The earlier comments still open, for the check pass to say which new finding repeats one (Criss,
+    // 2026-10-15). Not behind `reReview`: that skips a pass and its spend, and this is a few rows more
+    // for the check pass to read, which decides what is said either way.
+    const earlierComments = existing === undefined ? [] : repeatCandidates(existing?.marker ?? null).questions
 
     let review: RunReviewResult
     try {
       review = await runReview({
         octokit, owner, repo, number, deployment, ask: prepared.ask, deps: runDeps, signal: stop.signal,
-        previousFindings, ...(a.runtime !== undefined && { runtime: a.runtime }),
+        previousFindings, earlierComments, ...(a.runtime !== undefined && { runtime: a.runtime }),
       })
       checkoutToRemove = review.checkoutDir
     } catch (e) {
@@ -618,8 +627,9 @@ export async function runReviewSession(a: {
       findings: published.findings,
       confirmed: published.confirmed,
       cutShort: review.result.cutShort,
-      // Inline and summary-only both: a finding said only in the summary was still said.
-      posted: published.counts.inline + published.counts.summaryOnly,
+      // Inline, summary-only and found again: a finding said only in the summary was still said, and
+      // so was one noted as still present on the comment that first reported it.
+      posted: published.counts.inline + published.counts.summaryOnly + published.counts.repeated,
       // GitHub's own link to the summary, now that it hands one back (spec 0.2.0 §14.2).
       summaryUrl: published.summaryUrl,
     }
@@ -630,6 +640,7 @@ export async function runReviewSession(a: {
       droppedInline: published.counts.droppedInline, suppressed: published.counts.suppressed,
       notInCheckout: published.counts.notInCheckout, retracted: published.counts.retracted,
       reinstated: published.counts.reinstated, retractionsWithheld: published.counts.retractionsWithheld,
+      repeated: published.counts.repeated, stillPresentNoted: published.counts.stillPresentNoted,
     })
     return {
       kind: 'reviewed', review, record, published, report: report(),

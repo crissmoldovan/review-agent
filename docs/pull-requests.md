@@ -117,6 +117,8 @@ review adds a line naming its three reviewers and how each ended. Then the summa
 - the reviewer's summary of the change, and its **intent** verdict — whether the change does what its description
   says (`matches`, `partial`, `diverges` or `unclear`);
 - **Not placed inline**: findings that could not go on a line, with their severity, file and line;
+- **Still present**: on a later review, findings an earlier review already commented on, each linked to that comment
+  ([re-reviews](#re-reviews));
 - **Could not be settled**: questions the reviewer could not answer from the code alone, and what would answer them;
 - **Not honoured**: anything a request asked for that was not done.
 
@@ -210,9 +212,16 @@ When a pull request that has been reviewed is reviewed again (by `/review` or **
 A comment is only ever appended to, never deleted, and only the reviewer's own comments on this pull request are
 edited. `cannot-tell`, or no answer, leaves a finding as it was.
 
-A problem the new review finds again is **posted again**: a later review posts its own inline comments, even on the
-same commit and line, in its own words. Only low findings (below 4) are held back on later reviews, unless the
-deployment sets `report.repeatNits`. So a second review of an unchanged commit repeats the first.
+A problem the new review finds again is **said once**, on the comment that first reported it. The check pass is shown
+the earlier inline comments still open and says which new finding describes the same defect, however it is now
+worded. Such a finding gets no new comment: its earlier comment gets **"Still present"** with the commit it was found
+at — once per commit, however often that commit is reviewed — and the summary lists it under **Still present** with a
+link to that comment. A reply under the earlier comment counts for it as before.
+
+This needs the [check pass](how-it-works.md#the-check-pass), and applies only to comments nobody has answered and none
+marked "No longer reported": a finding that repeats a comment someone replied `/dispute` or `/defer` to is posted as
+a new comment, as are all findings when the check pass is skipped. Low findings (below 4) are held back on later
+reviews as before, unless the deployment sets `report.repeatNits`.
 
 This pass costs extra: its own target is a quarter of the review's soft budget, and its own ceiling 2.5 times that —
 $0.50 and $1.25 on `basic` ([budgets](configuration.md#budgets)) — and it runs only when that ceiling still fits under

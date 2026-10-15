@@ -123,6 +123,12 @@ On a [multi-reviewer review](#a-multi-reviewer-review-step-by-step) it is also a
 repeats an earlier one in the list — the same defect, however it is worded — and a finding it marks so is not posted
 either. A review by one reviewer is never asked this: its check pass runs the same words it always has.
 
+On a **later review** of a pull request whose earlier inline comments are still open — nobody replied `/dispute` or
+`/defer`, none marked "No longer reported" — it is also shown those earlier findings and asked which new finding
+repeats one, copying that finding's file back so an answer shifted by one row is thrown away. A finding it links is
+not posted again: the earlier comment is told it is **still present**, and the summary lists it with a link
+([re-reviews](pull-requests.md#re-reviews)). A first review is never asked this.
+
 ## A multi-reviewer review, step by step
 
 `/review --multi` (any tier) changes steps 9 and 10 above and the summary; everything else is the same review.
@@ -207,7 +213,7 @@ that produced them are known, so it records all of them.
 | `cutShort`, `wrapUpFired` | whether the ceiling stopped the review; `wrapUpFired` is always `false` in this release |
 | `failure` | why the review did not finish, or `null`. On a multi-reviewer review, `null` when any reviewer answered; otherwise the first reviewer's, with every reviewer's in `focuses` |
 | `output` | the summary, intent verdict, findings and inconclusive items. On a multi-reviewer review each finding carries the `lens` that found it, duplicates included |
-| `checkVerdicts`, `recheckJudgements`, `recheckSkipped` | what the check and re-check passes said, or why the re-check did not run. On a multi-reviewer review each verdict carries `duplicateOf`: the earlier finding it repeats, or `null` |
+| `checkVerdicts`, `recheckJudgements`, `recheckSkipped` | what the check and re-check passes said, or why the re-check did not run. On a multi-reviewer review each verdict carries `duplicateOf`: the earlier finding it repeats, or `null`. On a later review with earlier comments still open, each carries `repeats`: the position of the earlier finding it repeats in the list the check pass was shown, or `null` |
 | `checkout` | `removedCredentialFiles`: what was deleted from the checkout before the review; `notWritten`: archive entries that could not be written, each with its path and error code; `caseCollisions`: groups of paths that differ only by letter case or Unicode form |
 | `timings` | start, finish, duration |
 

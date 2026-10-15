@@ -223,6 +223,13 @@ posted 1 inline comment and a summary comment: https://github.com/owner/name/pul
 reported with a commit status: success
 ```
 
+and, on a later review that found a problem an earlier comment already reports
+([re-reviews](pull-requests.md#re-reviews)), one more under the first:
+
+```
+found again: 1 finding said on the earlier comment instead of a new one (1 comment noted "still present")
+```
+
 With `--json`, stdout is the [review record](how-it-works.md#the-review-record).
 
 Files of the repository that could not be written to the downloaded copy, and paths that differ only by letter

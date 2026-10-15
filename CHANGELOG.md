@@ -3,6 +3,23 @@
 All five packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app`, `@review-agent/cli` and
 `@review-agent/sdk` — are released together, at the same version (the SDK from 0.2.0).
 
+## 0.2.3 — 2026-10-15
+
+- **A problem found again is said once, on the comment that first reported it.** Each review used to post every
+  finding as a new inline comment, so a defect still in the code was posted again, on the same line, in new words:
+  on the demo repository's pull request #14, a second `/review` of an unchanged commit put the same defect up
+  twice. Now, on a later review, the check pass is shown the earlier inline comments still open and says which
+  new finding repeats one, copying that finding's file back so an answer shifted by one row is thrown away. A
+  repeat gets no new comment. Its earlier comment gets **"Still present"** with the commit it was found at (once
+  per commit), and the summary lists it under **Still present** with a link to that comment. A comment someone
+  answered with `/dispute` or `/defer`, or one marked "No longer reported", is not offered, and without the check
+  pass nothing changes. The re-review pass can no longer stamp "No longer reported" on a comment the same review has
+  just found again.
+- **New in the record and the counts:** each check verdict on such a review carries `repeats` (the earlier finding
+  it repeats, or `null`); `counts` gains `repeated` and `stillPresentNoted`; the CLI prints a `found again:` line.
+  The review instructions are now version `1.4.0` — one paragraph added to the check pass, sent only on a later
+  review with earlier comments open.
+
 ## 0.2.2 — 2026-10-15
 
 - **The terminal now prints the severity the pull request is told.** With the check pass on, the CLI printed each

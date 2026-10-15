@@ -15,7 +15,15 @@ import type { downloadArchive } from './archive'
 import type { fetchPullRequest, PullRequestContext } from './pr'
 import type { fetchRepoConfig } from './repo-config'
 
-export type CheckPassResult = { verdicts: CheckVerdict[]; usage: Usage }
+export type CheckPassResult = {
+  verdicts: CheckVerdict[]
+  usage: Usage
+  /** The earlier findings the pass was shown, to say which new finding repeats one (Criss,
+   *  2026-10-15): `repeatCandidates(marker).questions` as it stood when the review ran. Absent when it
+   *  was shown none. `publishReview` re-derives the list and acts on no `repeats` unless the two are
+   *  the same, as it does with the re-review pass's `asked`. */
+  earlier?: PreviousFinding[]
+}
 
 /** What the re-review pass answered, and the list it was asked about.
  *
@@ -193,6 +201,12 @@ export const runReview = async (a: {
    *  review: no re-review pass runs and nothing is spent on one. The CLI passes nothing, reads no
    *  marker, and so buys no third pass. */
   previousFindings?: PreviousFinding[]
+  /** The earlier inline comments still open on this pull request, one finding each, as
+   *  `repeatCandidates` in marker.ts lists them out of the same marker (Criss, 2026-10-15). Given, the
+   *  check pass is shown them and says which new finding repeats one, so that finding is noted on the
+   *  comment rather than posted again. Read only in `inline+summary`, the one mode that posts inline
+   *  comments, and only when the check pass runs: without it, every finding is posted as before. */
+  earlierComments?: PreviousFinding[]
   /** The credential, binary and passed-through variables every model pass of this review runs with
    *  (spec 0.2.0 §3.2). Left out, the Claude process takes them from this process's environment, as
    *  before. */
@@ -326,9 +340,14 @@ export const runReview = async (a: {
     let check: CheckPassResult | null = null
     if (settings.check && result.output !== null) {
       const reporting = focusRuns.filter((f) => (f.result.output?.findings.length ?? 0) > 0).length
-      check = await deps.runCheckPass({
-        findings: result.output.findings, input, ...(settings.multi && { focuses: reporting }),
-      })
+      const earlier = settings.report.mode === 'inline+summary' ? a.earlierComments ?? [] : []
+      check = {
+        ...await deps.runCheckPass({
+          findings: result.output.findings, input, ...(settings.multi && { focuses: reporting }),
+          ...(earlier.length > 0 && { earlier }),
+        }),
+        ...(earlier.length > 0 && { earlier }),
+      }
       assertVerdictsCarryNoSecrets(check.verdicts)
     }
 

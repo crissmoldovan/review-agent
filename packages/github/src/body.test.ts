@@ -573,3 +573,37 @@ describe('codeSpan — evidence exactly as written, whatever it quotes (CommonMa
     expect(body).toContain('- ``src/a.ts:1 uses `x` here``')
   })
 })
+
+import { stillPresentMarker, stillPresentNote } from './body'
+
+describe('stillPresentNote', () => {
+  const SHA = '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'
+  it('says the issue was found again at a named commit, carries its hidden marker, and claims nothing more', () => {
+    const n = stillPresentNote({ headSha: SHA })
+    expect(n.startsWith('---\n')).toBe(true)
+    expect(n).toContain(stillPresentMarker(SHA))
+    expect(n).toContain('**Still present** at `4f8e2a1`')
+    expect(n).not.toMatch(/fixed|resolved/i)
+  })
+})
+
+describe('summaryBody: what was found again', () => {
+  const base = {
+    headSha: 'a'.repeat(40), via: { kind: 'app' } as ReviewVia, tier: 'basic' as const, model: 'm', costUsd: 0.2,
+    summary: 's', intent: { verdict: 'matches' as const, note: 'n' }, summaryOnly: [], inconclusive: [],
+    marker: { version: 1 as const, runs: [] }, refused: [], checkoutGaps: { notWritten: [], caseCollisions: [] },
+  }
+  const f: Finding = {
+    file: 'src/format.ts', line: 16, endLine: null, severity: 7, category: 'correctness',
+    title: 'JPY is 100x wrong', explanation: 'e', evidence: [], suggestion: null,
+  }
+  it('lists each with a link to the comment that first reported it', () => {
+    const body = summaryBody({ ...base, stillPresent: [{ finding: f, commentId: 4279876144 }] })
+    expect(body).toContain('#### Still present')
+    expect(body).toContain('- **7/10** `src/format.ts:16` — **JPY is 100x wrong** — [the earlier comment](#discussion_r4279876144)')
+  })
+  it('has no such section when nothing was found again', () => {
+    expect(summaryBody(base)).not.toContain('Still present')
+    expect(summaryBody({ ...base, stillPresent: [] })).not.toContain('Still present')
+  })
+})

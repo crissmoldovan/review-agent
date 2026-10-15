@@ -8,13 +8,13 @@ import { anchorFindings } from './anchor'
 import { inlineBody, reinstatementNote, retractionNote, reviewBody, summaryBody, type ReviewVia } from './body'
 import {
   commentIdsIn, findingId, markerRunFor, nextMarkerState, recheckQuestions, reinstatableComments,
-  retractableComments, type MarkerState, type PostedFindings,
+  repeatCandidates, retractableComments, type MarkerState, type PostedFindings, type RepeatedFinding,
 } from './marker'
 import {
-  commentKey, findSummaryComment, postReview, reinstateInlineComment, retractInlineComment,
+  commentKey, findSummaryComment, noteStillPresent, postReview, reinstateInlineComment, retractInlineComment,
   upsertSummaryComment, type FoundSummary, type InlineComment, type SummaryCommentResult,
 } from './post'
-import { duplicatesIn, selectForPosting } from './report'
+import { duplicatesIn, repeatsIn, selectForPosting } from './report'
 import type { RunReviewResult } from './run-review'
 import { fetchThreadReplies } from './threads'
 
@@ -37,7 +37,14 @@ export type PublishCounts = {
    *  the re-review pass now says is still there, or that a person has disputed. 0 on almost every
    *  review, and above 0 exactly when an earlier review was wrong in public. */
   reinstated: number
-  /** A note this review meant to write, in either direction, and did not: GitHub refused the read or
+  /** Findings this review found again and said once, on the earlier comment that first reported
+   *  them, rather than in a new comment (Criss, 2026-10-15). Listed in the summary. 0 on a first
+   *  review, without the check pass, and in every mode but `inline+summary`. */
+  repeated: number
+  /** Earlier inline comments edited to say their defect is still present: one per comment, however
+   *  many of this review's findings repeat it, and none for a comment already told about this commit. */
+  stillPresentNoted: number
+  /** A note this review meant to write, in any direction, and did not: GitHub refused the read or
    *  the edit, the comment is not on this pull request or is somebody's reply, this very review is
    *  reporting that finding again, or this very review has a comment on the line GitHub holds it at.
    *  NOT a comment that already says what the note would have said — that one needs nothing. A number
@@ -221,7 +228,7 @@ export async function publishReview(a: {
   //     reads as "nothing is repaired": the pass threw, timed out, was refused its budget, answered
   //     unusably, dropped its own words over a secret, was never run because this is a first review,
   //     or answered about a different list than this one. Design point 4, in one expression.
-  const judgements: RecheckJudgement[] =
+  const judged: RecheckJudgement[] =
     completed && review.recheck !== null &&
     sameAsk(recheckQuestions(previous).questions, review.recheck.asked)
       ? review.recheck.judgements
@@ -250,8 +257,51 @@ export async function publishReview(a: {
     check: checked,
   })
 
+  // 4b. Found again (Criss, 2026-10-15). A finding the check pass says repeats an inline comment an
+  //     earlier review left open is not posted again: it is listed in the summary as still present,
+  //     and that comment is told so (step 9). Only when this review posts inline comments, and only
+  //     when the list the pass was shown is the one this marker gives — the same guard as `sameAsk`
+  //     on the re-review's judgements: a `repeats` is a position in that list, and a list that does
+  //     not match would aim a note at some other comment. After `selectForPosting`, so what is said
+  //     at all — refuted, the low-band cap — is decided exactly as before; this only decides WHERE.
+  //     By `findingId`, because the plan carries copies at the check's severity: two findings sharing
+  //     file, category and title go together, which `verdictsById` already does for their verdicts.
+  const offered = repeatCandidates(previous)
+  const linked = writesInline && review.check?.earlier !== undefined &&
+    sameAsk(offered.questions, review.check.earlier)
+    ? repeatsIn(checked, offered.questions.length)
+    : new Map<number, number>()
+  const earlierCommentOf = new Map<string, number>()
+  for (const [i, row] of linked) {
+    const f = findings[i]
+    const commentId = offered.commentIds[row]
+    if (f !== undefined && commentId !== undefined && !duplicates.has(i)) earlierCommentOf.set(findingId(f), commentId)
+  }
+  const repeated: RepeatedFinding[] = []
+  const notRepeated = (f: Finding): boolean => {
+    const commentId = earlierCommentOf.get(findingId(f))
+    if (commentId === undefined) return true
+    repeated.push({ finding: f, commentId })
+    return false
+  }
+  const planInline = plan.inline.filter((x) => notRepeated(x.finding))
+  const planSummaryOnly = plan.summaryOnly.filter(notRepeated)
+
+  // The re-review pass may not stamp "No longer reported" on a comment this review has just found
+  // the defect of again: that is the two passes contradicting each other about one commit, and the
+  // summary is about to list it as still present. Its `resolved` for any row on such a comment is
+  // dropped, so the row keeps what it said — `open`, the only outcome a comment offered for repeats
+  // can have.
+  const onRepeated = new Set(repeated.map((r) => r.commentId))
+  const asked = recheckQuestions(previous)
+  const judgements = judged.filter((j) => j.state !== 'resolved' ||
+    !(asked.addresses[j.index] ?? []).some(({ run, row }) => {
+      const commentId = previous?.runs[run]?.findings[row]?.commentId ?? null
+      return commentId !== null && onRepeated.has(commentId)
+    }))
+
   // 5. The words (Task 3). `x.finding` already carries the check's severity (selectForPosting).
-  const inline: InlineComment[] = plan.inline.map((x) => ({
+  const inline: InlineComment[] = planInline.map((x) => ({
     findingId: findingId(x.finding), path: x.finding.file, line: x.line, side: x.side,
     body: inlineBody(x.finding),
   }))
@@ -271,11 +321,12 @@ export async function publishReview(a: {
   // exists for them. Task 13 logs counts.droppedInline.
   const refused = new Set((posted?.droppedInline ?? []).map((c) => c.findingId))
   const said: PostedFindings = {
-    inline: plan.inline.filter((x) => !refused.has(findingId(x.finding))),
+    inline: planInline.filter((x) => !refused.has(findingId(x.finding))),
     summaryOnly: [
-      ...plan.summaryOnly,
-      ...plan.inline.filter((x) => refused.has(findingId(x.finding))).map((x) => x.finding),
+      ...planSummaryOnly,
+      ...planInline.filter((x) => refused.has(findingId(x.finding))).map((x) => x.finding),
     ],
+    repeated,
   }
 
   // 7. The next state (Task 7), built AFTER the review exists, because it must carry this review's
@@ -323,7 +374,7 @@ export async function publishReview(a: {
     }),
     summary: review.result.failure === null && output !== null ? output.summary : unfinishedSummary(review),
     intent: output?.intent ?? NO_INTENT,
-    summaryOnly: said.summaryOnly, inconclusive: output?.inconclusive ?? [], marker,
+    summaryOnly: said.summaryOnly, stillPresent: repeated, inconclusive: output?.inconclusive ?? [], marker,
     refused: notHonoured,
     checkoutGaps: { notWritten: record.checkout.notWritten, caseCollisions: record.checkout.caseCollisions },
   })
@@ -370,6 +421,7 @@ export async function publishReview(a: {
   const saidIds = new Set([
     ...said.inline.map((x) => findingId(x.finding)),
     ...said.summaryOnly.map((f) => findingId(f)),
+    ...repeated.map((r) => findingId(r.finding)),
   ])
   let retracted = 0
   let reinstated = 0
@@ -396,11 +448,26 @@ export async function publishReview(a: {
     }
   }
 
+  // 9b. The earlier comments this review found the defect of again (step 4b), told so — once each,
+  //     however many of this review's findings repeat one. Last, like the notes above and for their
+  //     reasons: the summary already lists them, and `noteStillPresent` never throws.
+  let stillPresentNoted = 0
+  if (writesSummary) {
+    const noted = new Set<number>()
+    for (const { finding, commentId } of repeated) {
+      if (noted.has(commentId)) continue
+      noted.add(commentId)
+      const result = await noteStillPresent({ octokit, owner, repo, number, commentId, headSha, file: finding.file })
+      if (result === 'edited') stillPresentNoted += 1
+      else if (result !== 'already-noted') retractionsWithheld += 1
+    }
+  }
+
   // Decision 6: the subset the check pass CONFIRMED, for a gate that demands confirmation. Read
   // through the SAME array runCheckPass was given, because CheckVerdict.index addresses it, and
   // matched by findingId because selectForPosting has already re-severitied the said findings. A
   // finding two verdicts disagree about is not confirmed, as in selectForPosting's collision rule.
-  const saidFindings = [...said.inline.map((x) => x.finding), ...said.summaryOnly]
+  const saidFindings = [...said.inline.map((x) => x.finding), ...said.summaryOnly, ...repeated.map((r) => r.finding)]
   const verdictKinds = new Map<string, Set<CheckVerdict['verdict']>>()
   for (const v of review.check?.verdicts ?? []) {
     const f = findings[v.index]
@@ -435,6 +502,8 @@ export async function publishReview(a: {
       retracted,
       reinstated,
       retractionsWithheld,
+      repeated: summary === null ? 0 : repeated.length,
+      stillPresentNoted,
     },
     marker,
     bodies: { review: reviewText, inline, summary: summaryText },

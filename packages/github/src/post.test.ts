@@ -924,3 +924,47 @@ describe('reinstateInlineComment', () => {
     expect(await reinstate(refused.octokit)).toBe('failed')
   })
 })
+
+import { noteStillPresent } from './post'
+import { stillPresentMarker } from './body'
+
+// Criss, 2026-10-15: a later review that finds an earlier comment's defect again says so on that
+// comment, once per commit, instead of posting it a second time.
+describe('noteStillPresent', () => {
+  const SHA = '4f8e2a1c9b7d6e5f3a2b1c0d9e8f7a6b5c4d3e2f'
+  const note = (octokit: Octokit, commentId = 4013794900) =>
+    noteStillPresent({ octokit, owner: 'acme', repo: 'widgets', number: 16, commentId, headSha: SHA, file: 'src/retry.ts' })
+
+  it('appends the note, keeping what the comment said', async () => {
+    const gh = fakeComment()
+    expect(await note(gh.octokit)).toBe('edited')
+    const body = String(gh.calls[1].params.body)
+    expect(body.startsWith('**Severity 8/10** · correctness\n\nNo backoff.\n\n---\n')).toBe(true)
+    expect(body).toContain(stillPresentMarker(SHA))
+    expect(body).toContain('**Still present** at `4f8e2a1`')
+  })
+
+  it('writes nothing on a comment already told about this commit, and writes again for a later one', async () => {
+    const told = fakeComment({ body: `No backoff.\n\n---\n${stillPresentMarker(SHA)}\n**Still present** at \`4f8e2a1\`` })
+    expect(await note(told.octokit)).toBe('already-noted')
+    expect(told.calls.map((c) => c.route)).toEqual([REVIEW_COMMENT])
+    const older = fakeComment({ body: `No backoff.\n\n---\n${stillPresentMarker('1'.repeat(40))}\n**Still present** at \`1111111\`` })
+    expect(await note(older.octokit)).toBe('edited')
+  })
+
+  it('refuses everything the retraction refuses, and never throws', async () => {
+    const elsewhere = fakeComment({ pullRequestUrl: 'https://api.github.com/repos/acme/widgets/pulls/9' })
+    expect(await note(elsewhere.octokit, 777000777)).toBe('not-ours-to-edit')
+    const reply = fakeComment({ inReplyTo: 4013794900 })
+    expect(await note(reply.octokit, 4013799999)).toBe('not-ours-to-edit')
+    const unauthorised = fakeComment({ omit: ['pull_request_url'] })
+    expect(await note(unauthorised.octokit)).toBe('failed')
+    const refused = fakeComment({ patchThrows: Object.assign(new Error('Forbidden'), { status: 403 }) })
+    expect(await note(refused.octokit)).toBe('failed')
+    const gone = fakeComment({ getThrows: Object.assign(new Error('Not Found'), { status: 404 }) })
+    expect(await note(gone.octokit)).toBe('failed')
+    for (const gh of [elsewhere, reply, unauthorised, gone]) {
+      expect(gh.calls.filter((c) => c.route === REVIEW_COMMENT_EDIT)).toEqual([])
+    }
+  })
+})

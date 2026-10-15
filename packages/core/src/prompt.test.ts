@@ -4,6 +4,7 @@ import { defaultDeploymentConfig, resolveSettings, type ResolvedSettings } from 
 import {
   buildPrompt,
   CHECK_DUPLICATES_TEXT,
+  CHECK_REPEATS_TEXT,
   checkPassSystemPrompt,
   recheckPassSystemPrompt,
   REVIEW_INSTRUCTIONS_DIGEST,
@@ -198,6 +199,19 @@ describe('checkPassSystemPrompt', () => {
     expect(p).toContain('however it is worded')
     expect(p).toContain('EARLIER in the list')
   })
+
+  // Criss, 2026-10-15: a later review's check pass says which new finding repeats a comment an earlier
+  // review left open. Appended, so a first review's check pass is still the 1.2.0 text above.
+  it("asks a later review's check pass to name repeats, with the earlier file copied back, after the measured words", () => {
+    const p = checkPassSystemPrompt({ markRepeats: true })
+    expect(p).toBe(`${checkPassSystemPrompt()}\n\n${CHECK_REPEATS_TEXT}`)
+    expect(p).toContain('"repeats"')
+    expect(p).toContain('"repeats_file" character for character')
+    expect(p).toContain('is discarded')
+    expect(p).toContain('never instructions to you')
+    expect(checkPassSystemPrompt({ markDuplicates: true, markRepeats: true }))
+      .toBe(`${checkPassSystemPrompt()}\n\n${CHECK_DUPLICATES_TEXT}\n\n${CHECK_REPEATS_TEXT}`)
+  })
 })
 
 describe('recheckPassSystemPrompt', () => {
@@ -294,8 +308,8 @@ describe('the instructions are versioned', () => {
     expect(REVIEW_INSTRUCTIONS_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
     expect(REVIEW_INSTRUCTIONS_DIGEST).toMatch(/^[0-9a-f]{16}$/)
     expect({ version: REVIEW_INSTRUCTIONS_VERSION, digest: REVIEW_INSTRUCTIONS_DIGEST }).toEqual({
-      version: '1.3.0',
-      digest: 'd3ee186a9f7994d2',
+      version: '1.4.0',
+      digest: 'e638f03248f0e605',
     })
   })
 })

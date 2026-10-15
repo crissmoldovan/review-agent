@@ -67,6 +67,27 @@ export const duplicatesIn = (check: CheckedFindings | null): Set<number> => {
   return out
 }
 
+/** Which findings repeat a comment an earlier review of this pull request left open (Criss,
+ *  2026-10-15): position in the array the check pass was given → position in the `earlier` list it
+ *  was shown (`CheckVerdict.repeats`; `repeatCandidates` in marker.ts says which comment that is).
+ *
+ *  A REFUTED finding repeats nothing that is said: it is not said at all, and telling an earlier
+ *  comment its defect is still present on the word of a finding the check pass disproved would say
+ *  more than the review does. `earlierCount` bounds the answer again here, as `duplicatesIn` bounds
+ *  its own — the pass reaches production as an injected dependency, and this is what holds whatever a
+ *  wrapper hands back. Empty when the pass was not shown earlier findings. */
+export const repeatsIn = (check: CheckedFindings | null, earlierCount: number): Map<number, number> => {
+  const out = new Map<number, number>()
+  for (const v of check?.verdicts ?? []) {
+    const r = v.repeats
+    if (typeof r !== 'number' || !Number.isInteger(r) || r < 0 || r >= earlierCount) continue
+    if (v.verdict === 'refuted') continue
+    if (v.index < 0 || v.index >= (check?.findings.length ?? 0)) continue
+    out.set(v.index, r)
+  }
+  return out
+}
+
 // `atCheckSeverity` was here and is deleted (Criss, 2026-09-16). It existed for one caller: the
 // marker's matcher paired an old row against a new finding by NEAREST SEVERITY, and the marker
 // stores what was said, which carries the check pass's number — so handing the matcher the

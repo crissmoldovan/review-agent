@@ -33,7 +33,7 @@ const BODY: RecordCallbackBody = {
       startedAt: new Date('2026-09-14T10:00:00.000Z'), finishedAt: new Date('2026-09-14T10:00:55.000Z'),
     }),
     reviewId: 77, summaryCommentId: 903,
-    counts: { inline: 0, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0 },
+    counts: { inline: 0, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0, repeated: 0, stillPresentNoted: 0 },
     verdict: '<!-- review-agent-verdict: {} -->',
     checkRun: { id: 4242, conclusion: 'success' },
     comments: [{ findingId: 'f-aaa', file: 'src/a.ts', line: 10, commentId: 5001 }],

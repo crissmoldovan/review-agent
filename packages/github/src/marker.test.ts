@@ -5,7 +5,7 @@ import {
 import {
   MARKER_CLOSE, MARKER_OPEN, MAX_RUNS, applyOutcomes, commentIdsIn, declaredOutcome, decodeMarker,
   diffRuns, encodeMarker, findingId, markerRunFor, nextMarkerState, recheckQuestions,
-  reinstatableComments, retractableComments,
+  reinstatableComments, repeatCandidates, retractableComments,
   type MarkerFinding, type MarkerRun, type MarkerState, type OutcomeChange,
 } from './marker'
 import type { AnchoredFinding } from './anchor'
@@ -391,6 +391,19 @@ describe('markerRunFor', () => {
       { id: findingId(a), file: 'src/a.ts', line: 12, severity: 7, category: 'correctness', title: 'A', commentId: 4242, outcome: 'open' },
       // A summary-only finding has no comment of its own, so no thread and no reply can reach it.
       { id: findingId(b), file: 'src/a.ts', line: 10, severity: 7, category: 'correctness', title: 'B', commentId: null, outcome: 'open' },
+    ])
+  })
+
+  // Criss, 2026-10-15: a finding found again is recorded against the EARLIER comment, so a reply under
+  // that comment is about this row too, and that comment stands while this row is open.
+  it('records a finding found again against the earlier comment it was said on', () => {
+    const run = markerRunFor({
+      headSha: 'c0ffee0', at: '2026-09-14T12:00:00.000Z',
+      posted: { inline: [], summaryOnly: [], repeated: [{ finding: a, commentId: 4001 }] },
+      commentIdFor: () => null,
+    })
+    expect(run.findings).toEqual([
+      { id: findingId(a), file: 'src/a.ts', line: 10, severity: 7, category: 'correctness', title: 'A', commentId: 4001, outcome: 'open' },
     ])
   })
 
@@ -1031,5 +1044,50 @@ describe('the carried verdict a retraction must not stamp on, end to end', () =>
     })
     expect(state.runs.map((r) => r.findings[0].outcome)).toEqual(['disputed', 'disputed', 'disputed'])
     expect(retractableComments({ settled: state.runs.slice(0, 2), before: twoRuns.runs })).toEqual([])
+  })
+})
+
+// Criss, 2026-10-15: the earlier comments a later review's check pass is shown, to say which new
+// finding repeats one.
+describe('repeatCandidates', () => {
+  const row = (over: Partial<MarkerFinding>): MarkerFinding => ({
+    id: 'x', file: 'src/a.ts', line: 10, severity: 6, category: 'correctness', title: 'T', commentId: 1, outcome: 'open', ...over,
+  })
+  const run = (headSha: string, findings: MarkerFinding[]): MarkerRun => ({ headSha, at: '2026-10-15T00:00:00.000Z', findings })
+
+  it('offers each open comment once, in its newest words, newest comment first', () => {
+    const s: MarkerState = { version: 1, runs: [
+      run('a', [row({ commentId: 1, title: 'first words' }), row({ commentId: 2, title: 'other' })]),
+      // A finding found again carries comment 1 in a later run: the later words stand for it.
+      run('b', [row({ commentId: 1, title: 'newer words', line: 12 }), row({ commentId: 3, title: 'third' })]),
+    ] }
+    const asked = repeatCandidates(s)
+    expect(asked.commentIds).toEqual([3, 1, 2])
+    expect(asked.questions.map((q) => [q.title, q.line])).toEqual([['third', 10], ['newer words', 12], ['other', 10]])
+    // The five fields the re-review pass is shown, and nothing of the marker's own bookkeeping.
+    expect(Object.keys(asked.questions[0]).sort()).toEqual(['category', 'file', 'line', 'severity', 'title'])
+  })
+
+  it('offers no comment a person answered, none judged fixed, and no finding that had no comment', () => {
+    const s: MarkerState = { version: 1, runs: [
+      run('a', [row({ commentId: 1, outcome: 'disputed' }), row({ commentId: 2, outcome: 'fixed' }), row({ commentId: null })]),
+      // Comment 1 is open again in a later run, and still not offered: the person spoke on it.
+      run('b', [row({ commentId: 1 }), row({ commentId: 4, outcome: 'deferred' }), row({ commentId: 5 })]),
+    ] }
+    expect(repeatCandidates(s).commentIds).toEqual([5])
+  })
+
+  it('offers at most the re-review pass\'s cap, keeping the newest', () => {
+    const many: MarkerState = { version: 1, runs: [
+      run('a', Array.from({ length: MAX_RECHECK_ROWS + 5 }, (_, i) => row({ commentId: 100 + i }))),
+    ] }
+    const ids = repeatCandidates(many).commentIds
+    expect(ids).toHaveLength(MAX_RECHECK_ROWS)
+    expect(ids[0]).toBe(100 + MAX_RECHECK_ROWS + 4)
+    expect(ids).not.toContain(100)
+  })
+
+  it('offers nothing on a first review', () => {
+    expect(repeatCandidates(null)).toEqual({ questions: [], commentIds: [] })
   })
 })

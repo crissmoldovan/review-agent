@@ -406,6 +406,22 @@ describe('runReviewSession: a re-review (spec 0.2.0 §3.3)', () => {
     expect(only(gh.calls, SUMMARY_EDIT)[0].params.comment_id).toBe(9002)
   })
 
+  // Criss, 2026-10-15: the check pass is shown the earlier comments still open, to say which new
+  // finding repeats one — and that is not the re-review pass, so `reReview: false` does not stop it.
+  it('shows the check pass the earlier comments still open, with or without the re-review pass', async () => {
+    for (const reReview of [true, false]) {
+      const gh = fakeGitHub({ issueComments: [summaryBy(9002, 'review-agent[bot]')], reviewComments: theirComment('review-agent[bot]').slice(0, 1) })
+      const { deps } = await session({ gh, reporter: checkRunReporter(), extra: { reReview } })
+      const earlier = vi.mocked(deps.runCheckPass).mock.calls[0]?.[0].earlier
+      expect(earlier?.map((q) => q.title)).toEqual([FINDING.title])
+    }
+  })
+
+  it('shows the check pass nothing earlier on a first review', async () => {
+    const { deps } = await session({ gh: fakeGitHub(), reporter: checkRunReporter() })
+    expect(vi.mocked(deps.runCheckPass).mock.calls[0]?.[0]).not.toHaveProperty('earlier')
+  })
+
   it('buys no re-review pass when told not to, and still edits the summary it found rather than posting a second (spec 0.2.0 §5.2)', async () => {
     const gh = fakeGitHub({ issueComments: [summaryBy(9002, 'review-agent[bot]')] })
     const { result, deps } = await session({ gh, reporter: checkRunReporter(), extra: { reReview: false } })
@@ -801,5 +817,19 @@ describe('the rules the App’s runner and the session share', () => {
       ] },
     ] }
     expect(postedCommentsOf({ headSha: HEAD_SHA, marker })).toEqual([{ findingId: 'bbbbbbbbbbbb', file: 'y', line: 2, commentId: 2 }])
+  })
+
+  // Criss, 2026-10-15: a finding found again is noted on the earlier review's comment. Its row carries
+  // that comment, which this review did not post, so it is not listed as this review's.
+  it('leaves out a finding found again, whose row carries an earlier review\'s comment', () => {
+    const marker: MarkerState = { version: 1, runs: [
+      { headSha: OLD_SHA, at: 'a', findings: [{ id: 'aaaaaaaaaaaa', file: 'x', line: 1, severity: 5, title: 'old', commentId: 1, outcome: 'open' }] },
+      { headSha: HEAD_SHA, at: 'b', findings: [
+        { id: 'bbbbbbbbbbbb', file: 'y', line: 2, severity: 5, title: 'new', commentId: 2, outcome: 'open' },
+        { id: 'dddddddddddd', file: 'x', line: 1, severity: 5, title: 'old, in new words', commentId: 1, outcome: 'open' },
+      ] },
+    ] }
+    expect(postedCommentsOf({ headSha: HEAD_SHA, marker, said: { repeated: [{ commentId: 1 }] } }))
+      .toEqual([{ findingId: 'bbbbbbbbbbbb', file: 'y', line: 2, commentId: 2 }])
   })
 })

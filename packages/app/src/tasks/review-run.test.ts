@@ -149,7 +149,7 @@ const publishedFor = (r: RunReviewResult, over: Partial<PublishedReview> = {}): 
     confirmed: null,
     counts: {
       inline: findings.length, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0,
-      retracted: 0, reinstated: 0, retractionsWithheld: 0,
+      retracted: 0, reinstated: 0, retractionsWithheld: 0, repeated: 0, stillPresentNoted: 0,
     },
     marker: { version: 1, runs: [] },
     bodies: { review: 'review body', inline: [], summary: 'summary body' },
@@ -271,7 +271,7 @@ describe('the review task', () => {
     expect(out).toEqual({
       kind: 'reviewed', headSha: HEAD, record: REVIEWED.record,
       reviewId: 77, summaryCommentId: 903,
-      counts: { inline: 1, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0 },
+      counts: { inline: 1, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0, repeated: 0, stillPresentNoted: 0 },
       verdict: expect.stringContaining(VERDICT_OPEN),
       // A finished review with the gate off concludes success (Task 6, Criss decision 5).
       checkRun: { id: 4242, conclusion: 'success' },
@@ -383,7 +383,7 @@ describe('what the report mode decides', () => {
       deployment: () => deployment,
       publishReview: vi.fn(async (a: { review: RunReviewResult }) => publishedFor(a.review, {
         mode: 'check-only', reviewId: null, summaryCommentId: null,
-        counts: { inline: 0, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0 },
+        counts: { inline: 0, summaryOnly: 0, droppedInline: 0, suppressed: 0, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0, repeated: 0, stillPresentNoted: 0 },
       })),
     })
     await reviewTaskRun(PAYLOAD, {}, d)
@@ -603,7 +603,7 @@ describe('what the check run carries', () => {
       // The check pass refuted it: publishReview said it nowhere, and says so in `findings`.
       publishReview: vi.fn(async (a: { review: RunReviewResult }) => publishedFor(a.review, {
         findings: [],
-        counts: { inline: 0, summaryOnly: 0, droppedInline: 0, suppressed: 1, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0 },
+        counts: { inline: 0, summaryOnly: 0, droppedInline: 0, suppressed: 1, notInCheckout: 0, retracted: 0, reinstated: 0, retractionsWithheld: 0, repeated: 0, stillPresentNoted: 0 },
       })),
     })
     const out = reviewedOf(await reviewTaskRun(PAYLOAD, {}, d))

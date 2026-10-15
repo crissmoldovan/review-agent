@@ -196,6 +196,47 @@ export function recheckQuestions(previous: MarkerState | null): RecheckAsk {
   return { questions: kept.map((i) => questions[i]), addresses: kept.map((i) => addresses[i]) }
 }
 
+/** The earlier comments a later review's check pass is shown, and the map back to them (Criss,
+ *  2026-10-15): `questions[i]` is what the pass is given at index `i`, and `commentIds[i]` is the
+ *  inline comment a finding that repeats it is noted on instead of being posted again.
+ *
+ *  ONE QUESTION PER COMMENT, offered only while every row pointing at that comment is `open`. A
+ *  comment some row stands `fixed` on carries, or is about to carry, "No longer reported", and the
+ *  re-review pass already re-asks those rows and reinstates the comment when the defect is back. A
+ *  comment a person answered — `disputed` or `deferred` on any of its rows — is theirs: a model does
+ *  not get to tell it the defect is still there. Both keep what happens today, a new comment.
+ *
+ *  The newest row's words stand for the comment: the defect as it was most recently described. Newest
+ *  comment first, so the cap (`MAX_RECHECK_ROWS`, the re-review pass's, for the same reason: this text
+ *  is read out of a public comment) keeps what a reader is looking at now. Deterministic, because
+ *  `publishReview` re-derives this list from the same marker and drops every `repeats` if the pass was
+ *  shown a different one. */
+export type RepeatAsk = { questions: PreviousFinding[]; commentIds: number[] }
+
+export function repeatCandidates(previous: MarkerState | null): RepeatAsk {
+  const newest = new Map<number, { run: number; index: number; row: MarkerFinding }>()
+  const closed = new Set<number>()
+  ;(previous?.runs ?? []).forEach((run, runIndex) => {
+    run.findings.forEach((f, index) => {
+      if (f.commentId === null) return
+      if (f.outcome !== 'open') closed.add(f.commentId)
+      newest.set(f.commentId, { run: runIndex, index, row: f })   // a later row overwrites an earlier one
+    })
+  })
+  const offered = [...newest]
+    .filter(([commentId]) => !closed.has(commentId))
+    // Newest run first; within a run, the later row first. Total, so the list is the same twice.
+    .sort(([, x], [, y]) => y.run - x.run || y.index - x.index)
+    .slice(0, MAX_RECHECK_ROWS)
+  return {
+    questions: offered.map(([, { row: f }]) => ({
+      file: f.file, line: f.line, severity: f.severity, title: f.title,
+      ...(f.category !== undefined && { category: f.category }),
+    })),
+    commentIds: offered.map(([commentId]) => commentId),
+  }
+}
+
 /** The re-review pass's answers, spread back over the rows they are about. Keyed by run index, then
  *  by row index — the two numbers `diffRuns` and `applyOutcomes` write by.
  *
@@ -291,7 +332,17 @@ export function diffRuns(a: {
 /** What a review actually said, in the two places it can say it. `PostingPlan` from report.ts is
  *  assignable to this, so a caller passes its plan straight in; the type is declared here rather
  *  than imported because report.ts already imports this module. */
-export type PostedFindings = { inline: AnchoredFinding[]; summaryOnly: Finding[] }
+export type PostedFindings = {
+  inline: AnchoredFinding[]
+  summaryOnly: Finding[]
+  /** Found again: said in the summary as still present, and noted on the earlier comment that first
+   *  reported it rather than posted as a new one (Criss, 2026-10-15). Optional, so a `PostingPlan`
+   *  — which has none — is still one of these. */
+  repeated?: RepeatedFinding[]
+}
+
+/** A finding this review found again, and the earlier inline comment it is said on. */
+export type RepeatedFinding = { finding: Finding; commentId: number }
 
 const entry = (f: Finding, line: number, commentId: number | null): MarkerFinding => ({
   id: findingId(f), file: f.file, line, severity: f.severity, title: f.title,
@@ -320,6 +371,10 @@ export function markerRunFor(a: {
       // No comment, so no thread: `commentId: null` is what `diffRuns` reads as "nobody could have
       // answered this". `Finding.line` is a number with 0 meaning file-level.
       ...a.posted.summaryOnly.map((f) => entry(f, f.line, null)),
+      // The EARLIER comment's id. That comment is where this defect is being discussed: a reply under
+      // it is about this row too, and it is retracted only when every row pointing at it is judged
+      // resolved (`retractableComments`), so one live repeat keeps it standing.
+      ...(a.posted.repeated ?? []).map((r) => entry(r.finding, r.finding.line, r.commentId)),
     ],
   }
 }

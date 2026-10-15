@@ -516,6 +516,8 @@ const SUMMARY_CREATE = 'POST /repos/{owner}/{repo}/issues/{issue_number}/comment
 const SUMMARY_EDIT = 'PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}'
 const REVIEW_CREATE = 'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews'
 const REVIEW_COMMENTS = 'GET /repos/{owner}/{repo}/pulls/{pull_number}/comments'
+const COMMENT_READ = 'GET /repos/{owner}/{repo}/pulls/comments/{comment_id}'
+const COMMENT_EDIT = 'PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}'
 
 /** A small GitHub that remembers what is written to it: who the token is, statuses, check runs, the
  *  summary comment and a review with its inline comments. A route nobody expected throws. */
@@ -544,6 +546,9 @@ const fakeGitHub = (seed: {
       case SUMMARY_EDIT: return ok({ id: params.comment_id, html_url: `https://github.com/acme/widgets/pull/16#issuecomment-${String(params.comment_id)}` })
       case REVIEW_CREATE: return ok({ id: 900 })
       case REVIEW_COMMENTS: return ok([])
+      // One earlier inline comment, 4001, on this pull request: what a finding found again is noted on.
+      case COMMENT_READ: return ok({ id: params.comment_id, body: 'Severity 6/10', pull_request_url: 'https://api.github.com/repos/acme/widgets/pulls/16', in_reply_to_id: null, path: FINDING.file, line: 100 })
+      case COMMENT_EDIT: return ok({ id: params.comment_id })
       default: throw new Error(`the fake was asked for a route the CLI should not call: ${route}`)
     }
   }
@@ -708,6 +713,19 @@ describe('runReviewCommand --post: the re-review', () => {
     const gh = fakeGitHub({ issueComments: [theApps, ...earlier()] })
     expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', post: true }, posting(gh))).toBe(EXIT_OK)
     expect(only(gh.calls, SUMMARY_EDIT).map((c) => c.params.comment_id)).toEqual([9003])
+  })
+
+  // Criss, 2026-10-15: a defect found again is said on the comment that first reported it.
+  it('says what was found again and noted on the earlier comment instead of posted anew', async () => {
+    const withComment: MarkerState = { version: 1, runs: [{ ...previous.runs[0], findings: [{ ...previous.runs[0].findings[0], commentId: 4001 }] }] }
+    const gh = fakeGitHub({ issueComments: [{ id: 9003, body: `### Review of \`1111111\`\n\n${encodeMarker(withComment)}\n`, user: { login: 'alice' } }] })
+    const d = posting(gh, {
+      runCheckPass: vi.fn(async () => ({ verdicts: [{ index: 0, verdict: 'confirmed' as const, severity: 6 as const, reason: 'r', evidence: [], repeats: 0 }], usage: CHECK_USAGE })),
+    })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', post: true, check: true, reReview: false }, d)).toBe(EXIT_OK)
+    expect(only(gh.calls, REVIEW_CREATE)).toEqual([])
+    expect(only(gh.calls, COMMENT_EDIT).map((c) => c.params.comment_id)).toEqual([4001])
+    expect(d.out.join('')).toContain('found again: 1 finding said on the earlier comment instead of a new one (1 comment noted "still present")')
   })
 
   it('skips the re-review pass with --no-re-review, and still edits the earlier summary', async () => {

@@ -300,6 +300,12 @@ const postedLines = (published: PublishedReview | null, report: SessionReport | 
     // `check-only` with a check run writes no comment at all: its findings are the run's annotations.
     lines.push(`posted ${what.length === 0 ? 'no comment' : listed(what)}` +
       (published.summaryUrl === null ? '' : `: ${published.summaryUrl}`))
+    // Criss, 2026-10-15: what was found again went on the earlier comments rather than into new ones.
+    const repeated = published.counts.repeated
+    if (repeated > 0) {
+      lines.push(`found again: ${plural(repeated, 'finding')} said on the earlier ${repeated === 1 ? 'comment' : 'comments'} ` +
+        `instead of a new one (${plural(published.counts.stillPresentNoted, 'comment')} noted "still present")`)
+    }
   }
   if (report !== null) {
     const kind = report.kind === 'check-run' ? 'a check run' : 'a commit status'

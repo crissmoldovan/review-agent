@@ -1,6 +1,6 @@
 import type { Octokit } from '@octokit/core'
 import { z } from 'zod'
-import { REINSTATED_MARKER, RETRACTED_MARKER } from './body'
+import { REINSTATED_MARKER, RETRACTED_MARKER, reinstatementNote, stillPresentMarker, stillPresentNote } from './body'
 import { MARKER_OPEN, decodeMarker, type MarkerState } from './marker'
 
 export type InlineComment = {
@@ -491,6 +491,62 @@ export async function reinstateInlineComment(a: {
     if (noteStanding(comment.body) !== 'retracted') return 'already-retracted'
     await octokit.request('PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}', {
       owner, repo, comment_id: commentId, body: `${comment.body}\n\n${a.note}`,
+    })
+    return 'edited'
+  } catch {
+    return 'failed'
+  }
+}
+
+/** What `noteStillPresent` did. Like `RetractionResult`, every failure is a value and none is thrown. */
+export type StillPresentResult =
+  | 'edited'
+  /** The comment already says so about this commit: a second run on it writes nothing. */
+  | 'already-noted'
+  | 'not-ours-to-edit'
+  | 'failed'
+
+/** Tell an earlier inline comment that this review found its defect again (Criss, 2026-10-15), rather
+ *  than post the defect a second time. The same read, the same scope refusals and the same
+ *  never-throws posture as `retractInlineComment`, for the same reasons: the comment id comes out of a
+ *  marker anyone can edit, so the comment must be on this pull request and be a comment this product
+ *  posted, not a reply.
+ *
+ *  A comment that currently stands RETRACTED gets the reinstatement note instead, and the hidden
+ *  still-present marker with it: the defect is back, and "Reported again" is what this product says
+ *  about a retraction that turned out wrong. It is not offered such a comment through `publishReview`
+ *  — `repeatCandidates` offers only comments whose rows are all `open` — so this is the case of a
+ *  marker and a comment that disagree, and it is resolved in the direction the comment can be read. */
+export async function noteStillPresent(a: {
+  octokit: Octokit
+  owner: string
+  repo: string
+  number: number
+  commentId: number
+  headSha: string
+  /** The finding's file, for the reinstatement note when that is the one written. */
+  file: string
+}): Promise<StillPresentResult> {
+  const { octokit, owner, repo, commentId } = a
+  try {
+    const got = await octokit.request('GET /repos/{owner}/{repo}/pulls/comments/{comment_id}', {
+      owner, repo, comment_id: commentId,
+    })
+    const comment = RetractableSchema.parse(got.data)
+    const on = pullRequestIn(comment.pull_request_url)
+    if (
+      on === null ||
+      on.number !== a.number ||
+      on.owner.toLowerCase() !== owner.toLowerCase() ||
+      on.repo.toLowerCase() !== repo.toLowerCase()
+    ) return 'not-ours-to-edit'
+    if ((comment.in_reply_to_id ?? null) !== null) return 'not-ours-to-edit'
+    if (comment.body.includes(stillPresentMarker(a.headSha))) return 'already-noted'
+    const note = noteStanding(comment.body) === 'retracted'
+      ? `${reinstatementNote({ file: a.file, headSha: a.headSha })}\n${stillPresentMarker(a.headSha)}`
+      : stillPresentNote({ headSha: a.headSha })
+    await octokit.request('PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}', {
+      owner, repo, comment_id: commentId, body: `${comment.body}\n\n${note}`,
     })
     return 'edited'
   } catch {

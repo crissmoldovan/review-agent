@@ -63,7 +63,7 @@ const published = (findings: Finding[]): PublishedReview => ({
   mode: 'inline+summary', headSha: HEAD_SHA, completed: true, reviewId: 900, summaryCommentId: 8100,
   summaryUrl: 'https://github.com/acme/widgets/pull/16#issuecomment-8100',
   said: { inline: [], summaryOnly: findings }, findings, confirmed: null,
-  counts: { inline: 1, summaryOnly: 1, droppedInline: 0, suppressed: 2, notInCheckout: 1, retracted: 0, reinstated: 0, retractionsWithheld: 0 },
+  counts: { inline: 1, summaryOnly: 1, droppedInline: 0, suppressed: 2, notInCheckout: 1, retracted: 0, reinstated: 0, retractionsWithheld: 0, repeated: 0, stillPresentNoted: 0 },
   marker: { version: 1, runs: [
     { headSha: '1'.repeat(40), at: 't0', findings: [{ id: 'old', file: RETRY_FILE, line: 3, severity: 5, title: 'old', commentId: 11, outcome: 'open' }] },
     { headSha: HEAD_SHA, at: 't1', findings: [

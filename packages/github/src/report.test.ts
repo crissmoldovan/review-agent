@@ -5,7 +5,7 @@ import {
 } from '@review-agent/core'
 import type { CheckVerdict } from '@review-agent/core'
 import type { AnchorResult } from './anchor'
-import { duplicatesIn, selectForPosting } from './report'
+import { duplicatesIn, repeatsIn, selectForPosting } from './report'
 
 // Settings are resolved, never hand-built: these tests are about what a deployment configures, so
 // they must read the same values resolveSettings hands the rest of the product.
@@ -319,5 +319,33 @@ describe('duplicatesIn', () => {
   it('names nothing when no check pass ran, or when it was not asked', () => {
     expect(duplicatesIn(null).size).toBe(0)
     expect(duplicatesIn({ findings: [finding(), finding()], verdicts: [v(0), v(1)] }).size).toBe(0)
+  })
+})
+
+// Criss, 2026-10-15: which findings repeat a comment an earlier review left open.
+describe('repeatsIn', () => {
+  const v = (index: number, repeats?: number | null, verdict: CheckVerdict['verdict'] = 'confirmed'): CheckVerdict => ({
+    index, verdict, severity: 6, reason: 'r', evidence: [], ...(repeats !== undefined && { repeats }),
+  })
+  const findings = [finding({ title: 'a' }), finding({ title: 'b' }), finding({ title: 'c' })]
+
+  it('maps each finding the check pass linked to the earlier comment it repeats', () => {
+    expect([...repeatsIn({ findings, verdicts: [v(0, 1), v(1, null), v(2, 0, 'uncertain')] }, 2)]).toEqual([[0, 1], [2, 0]])
+  })
+
+  // A refuted finding is said nowhere, so it may not tell an earlier comment its defect is still there
+  // — and through `findingId`, it would otherwise carry its twin onto that comment with it.
+  it('takes no link from a finding the check pass refuted', () => {
+    expect(repeatsIn({ findings, verdicts: [v(0, 0, 'refuted')] }, 2).size).toBe(0)
+  })
+
+  it('trusts no link outside the list the pass was shown, nor one about a finding that is not there', () => {
+    const verdicts = [v(0, 2), v(1, -1), { ...v(2), repeats: 0.5 }, v(7, 0)]
+    expect(repeatsIn({ findings, verdicts }, 2).size).toBe(0)
+  })
+
+  it('names nothing when no check pass ran, or it was shown nothing earlier', () => {
+    expect(repeatsIn(null, 3).size).toBe(0)
+    expect(repeatsIn({ findings, verdicts: [v(0), v(1)] }, 0).size).toBe(0)
   })
 })

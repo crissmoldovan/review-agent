@@ -262,12 +262,13 @@ finding became — set `REVIEW_AGENT_RECORD_URL` (it must be `https://`) and a s
     "result": {
       "kind": "reviewed",
       "headSha": "…",                      // the commit reviewed
-      "record": { "recordVersion": 1, "engineVersion": "0.2.2", "…": "…" },   // see How it works
+      "record": { "recordVersion": 1, "engineVersion": "0.2.3", "…": "…" },   // see How it works
       "reviewId": 77,                      // the GitHub review, or null
       "summaryCommentId": 903,             // the summary comment, or null
       "counts": {
         "inline": 2, "summaryOnly": 1, "droppedInline": 0, "suppressed": 1, "notInCheckout": 0,
-        "retracted": 0, "reinstated": 0, "retractionsWithheld": 0
+        "retracted": 0, "reinstated": 0, "retractionsWithheld": 0,
+        "repeated": 0, "stillPresentNoted": 0        // found again, and earlier comments told so
       },
       "verdict": "<!-- review-agent-verdict: {…} -->",
       "checkRun": { "id": 4242, "conclusion": "success" },                  // or null

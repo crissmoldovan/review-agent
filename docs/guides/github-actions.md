@@ -56,20 +56,20 @@ it — it runs with your API key. From the root of a clone of your repository:
 
 ```sh
 mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.2/examples/github-actions/review.yml \
+curl -fsSL https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.3/examples/github-actions/review.yml \
   -o .github/workflows/review-agent.yml
 ```
 
 ```powershell
 New-Item -ItemType Directory -Force .github/workflows | Out-Null
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.2/examples/github-actions/review.yml `
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.3/examples/github-actions/review.yml `
   -OutFile .github/workflows/review-agent.yml
 ```
 
 The file pins two versions. Keep both pinned, and change them on purpose:
 
 - `@anthropic-ai/claude-code@2.1.258` — the Claude Code the reviewer's flags were measured against;
-- `@review-agent/cli@0.2.2` — the reviewer.
+- `@review-agent/cli@0.2.3` — the reviewer.
 
 ## 3. Open a pull request
 
@@ -212,10 +212,9 @@ What it shows:
 - The summary comment is the **same comment**, edited in place (the URL is the first review's).
 - The re-review pass asked about the first review's findings. The JPY problem was still in the code, so nothing was
   marked "No longer reported".
-- **A problem still in the code is posted again.** The JPY finding went up as a second inline comment on the same
-  line, under the new review's wording. Only low findings are held back on a later review
-  ([`report.repeatNits`](../configuration.md)), so ask for another review when the code has changed, not to
-  re-read the same commit.
+- **0.2.2 posted a problem still in the code again.** The JPY finding went up as a second inline comment on the same
+  line, under the new review's wording. From 0.2.3 a finding the check pass links to an earlier comment is said on
+  that comment instead, as **Still present** ([re-reviews](../pull-requests.md#re-reviews)).
 
 ## Pull requests from forks
 
@@ -271,7 +270,7 @@ different things on two runs of the same pull request.
 
 ## Upgrading
 
-Change `@review-agent/cli@0.2.2` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
+Change `@review-agent/cli@0.2.3` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
 a pull request — it is reviewed by the new version. Change `@anthropic-ai/claude-code@2.1.258` only when a release of
 the reviewer says to.
 

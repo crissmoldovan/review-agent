@@ -149,6 +149,9 @@ export type SummaryInput = {
   summary: string
   intent: { verdict: IntentVerdict; note: string }
   summaryOnly: Finding[]
+  /** Found again: each with the earlier inline comment it is noted on instead of a new one (Criss,
+   *  2026-10-15). Absent or empty on a first review. */
+  stillPresent?: { finding: Finding; commentId: number }[]
   inconclusive: Inconclusive[]
   marker: MarkerState
   /** What the requester asked for and did not get, already phrased as sentences by whoever knew
@@ -216,6 +219,17 @@ export const summaryBody = (a: SummaryInput): string => {
     lines.push('', '#### Not placed inline', '')
     for (const f of a.summaryOnly) {
       lines.push(`- **${f.severity}/10** \`${f.file}:${f.line}\` — **${f.title}** — ${f.explanation}`)
+    }
+  }
+  // Criss, 2026-10-15: a defect an earlier review reported and this one found again is said once, on
+  // the comment that first reported it. Listed here so the summary still names everything this review
+  // found, with the way to that comment: `#discussion_r<id>` is the id GitHub gives an inline comment
+  // on the pull request's own page (checked 2026-10-15), so the link works on any GitHub host.
+  if ((a.stillPresent ?? []).length > 0) {
+    lines.push('', '#### Still present', '',
+      'Found again at this commit, and noted on the comment that first reported each, rather than posted again:', '')
+    for (const { finding: f, commentId } of a.stillPresent ?? []) {
+      lines.push(`- **${f.severity}/10** \`${f.file}:${f.line}\` — **${f.title}** — [the earlier comment](#discussion_r${commentId})`)
     }
   }
   // Design §4.5: every measured review produced inconclusive items, and all of them needed running
@@ -327,6 +341,24 @@ export const retractionNote = (a: { file: string; headSha: string }): string => 
   `**No longer reported.** The reviewer read ${inlineCode(a.file)} at \`${a.headSha.slice(0, 7)}\``
   + ' and no longer finds this issue there. That is one reviewer\'s answer at one commit, and not'
   + ' proof that a person fixed it. The comment above is left as it was said.',
+].join('\n')
+
+/** Hidden in the still-present note with the commit it is about, so a comment is told once per commit
+ *  however many times that commit is reviewed (Criss, 2026-10-15). */
+export const stillPresentMarker = (headSha: string): string => `<!-- review-agent:still-present:${headSha} -->`
+
+/** What a later review says on an earlier inline comment whose defect it has found again (Criss,
+ *  2026-10-15), instead of posting a second comment about it. Measured on the demo repository's pull
+ *  request #14: a second review of an unchanged commit put the same defect up twice, on one line, in
+ *  two wordings.
+ *
+ *  The retraction note's rules hold here too: it names the commit it read, it claims nothing about who
+ *  changed what, and it is APPENDED — the comment above it stays as it was said. */
+export const stillPresentNote = (a: { headSha: string }): string => [
+  '---',
+  stillPresentMarker(a.headSha),
+  `**Still present** at \`${a.headSha.slice(0, 7)}\`: a later review found this issue again, and says so`
+  + ' here rather than in a new comment.',
 ].join('\n')
 
 /** Hidden in the reinstatement note, the twin of `RETRACTED_MARKER`. The LAST of the two in a body
