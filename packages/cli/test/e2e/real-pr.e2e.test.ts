@@ -68,11 +68,17 @@ describeIf('end to end, read-only', () => {
     expect(await sanitiseCheckout(dir)).toEqual({ gitDirs: [], removed: [] })
   })
 
-  it('refuses to post, and says which sub-project owns posting', { timeout: 30_000 }, async () => {
-    const failed = await run('node', [BIN, 'review', '--repo', `${OWNER}/${REPO}`,
-                                      '--pr', String(NUMBER), '--post']).catch((e: unknown) => e)
-    expect(failed).toMatchObject({ code: 2 })
-    expect(String((failed as { stderr: string }).stderr)).toContain('sub-project 2')
+  // `--post` posts since 0.2.0 (spec 0.2.0 §5), so this suite — read-only by its name — no longer runs it.
+  // What it checks instead is `doctor`, which only reads: the real token is seen by GitHub and never
+  // printed, and the real repository is readable.
+  it('runs doctor against the real repository, reading only and printing no token', { timeout: 60_000 }, async () => {
+    const ran = await run('node', [BIN, 'doctor', '--repo', `${OWNER}/${REPO}`])
+      .then((r) => ({ ...r, code: 0 }), (e: { stdout?: string; stderr?: string; code?: number }) => ({
+        stdout: e.stdout ?? '', stderr: e.stderr ?? '', code: e.code ?? -1,
+      }))
+    expect(ran.stdout).toContain('✓ GitHub token: from GITHUB_TOKEN')
+    expect(ran.stdout).toContain(`✓ ${OWNER}/${REPO}: readable`)
+    expect(`${ran.stdout}${ran.stderr}`).not.toContain(token)
   })
 
   // Gate 2: the only test in this repository that can spend money. `pnpm test` cannot reach the file

@@ -93,6 +93,41 @@ released together, at the same version.
   The CLI has no `--multi` flag yet.
 - **A multi-reviewer re-review** fits its re-review pass under the three reviewers' ceilings together, not one.
 
+### Stage 4 — the CLI
+
+- **`review-agent review --post` posts**, as whoever the GitHub token belongs to: the review with its inline comments,
+  the summary comment, and a report on the commit. At a terminal it first says once what it will post and as whom —
+  *"This will post as @alice on acme/widgets#16: a review with inline comments, a summary comment and a commit status
+  "review-agent". Continue? [y/N]"* — and anything but `y` posts and spends nothing; `--yes` skips the question, and
+  without a terminal nothing is asked. The automated-review line says *run by @alice from the command line*, or *from
+  GitHub Actions* when `GITHUB_ACTIONS=true` (the wording only). The old `--post` refusal is gone.
+- **`--report auto|check-run|status|none`** (default `auto`): a person's token reports with a commit status, an
+  installation token — an App's, or a workflow's own `GITHUB_TOKEN` — with a check run, decided with one `GET /user`.
+  A commit status is a soft gate, and the docs say so wherever they mention it. `--report check-run` with a person's
+  token is refused before the pull request is read. Ctrl-C after a status was set `pending` sets it to `error` on the way out.
+- **`--re-review`**, on with `--post`: the reviewer reads its earlier summary on the pull request and runs the re-review
+  pass; `--no-re-review` skips the pass and still edits that summary. `runReviewSession` takes `reReview: false` for
+  the same. Without `--post` nothing is read, as before.
+- **`--multi`**, **`--github-host <host>`** (GitHub Enterprise Server, `https://<host>/api/v3`; not tested against one
+  yet), **`--keep-checkout`** (keeps the downloaded code and prints where), **`--yes`**, and **`review-agent
+  --version`**, whose version is built into the bundle.
+- **The GitHub token** comes from `GITHUB_TOKEN`, then `GH_TOKEN` (each only when not empty), then `gh auth token
+  --hostname <host>`; at a terminal with `gh` installed but logged out, it offers to run `gh auth login --web` for you.
+  Without a terminal it exits `2` naming exactly what to set. `gh` is started by absolute path, never a bare name. The
+  token is never printed — an error message quoting it prints `[redacted]` — and never reaches the Claude process.
+- **Exit code `4`:** reviewed and paid for, but posting failed. The review is printed so it is not lost.
+- **`--json` with `--post`** prints `{ "record", "posted": { reviewId, summaryCommentId, summaryUrl, inlineComments },
+  "report": { kind, conclusion, url } }`; without `--post`, the bare record as before.
+- **The readable summary's cost is the review's total** — every pass it bought, the re-review pass and every focus of a
+  multi-reviewer review included — and is labelled as model spend at per-token API prices.
+- **`review-agent doctor [--repo owner/name] [--github-host host]`** checks this machine for `review --post`, one line
+  per check with `✓`, `✗` (and a fix) or `!`: Node, the Claude Code binary and its `--version`, the model credential by
+  name and kind, `ANTHROPIC_BASE_URL`, the GitHub token's source and identity — a classic token's scope names — and,
+  with `--repo`, read access, push access, scopes, and whether it would report with a check run or a commit status. It
+  only reads, prints no credential's value, and exits `0` when ready, `2` when not.
+- **Library:** core exports `resolveClaudeBinary`; `tokenIdentityOf` keeps a classic token's scope names
+  (`scopes`); `ReviewVia`'s `cli` kind takes `from: 'command-line' | 'github-actions'`.
+
 ## 0.1.3
 
 ### Fixed

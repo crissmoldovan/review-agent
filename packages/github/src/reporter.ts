@@ -255,9 +255,25 @@ export const noReporter: Reporter = { kind: 'none', start: async () => null }
 /** Whose token this is, as far as reporting needs to know: a USER — a person, or a machine account —
  *  whose login is known, or an INSTALLATION — an App's token, or Actions' `GITHUB_TOKEN`, which is
  *  one (spec 0.2.0 §2.2). */
-export type TokenIdentity = { kind: 'user'; login: string } | { kind: 'installation' }
+export type TokenIdentity =
+  /** `scopes`: a classic token's scope NAMES, from the same answer's `x-oauth-scopes` header — what
+   *  `review-agent doctor` says the token can reach (spec 0.2.0 §10). Names, never the token. Absent
+   *  when GitHub sent no such header; NOT VERIFIED by a live call here that a fine-grained token is
+   *  answered without one, so nothing decides anything on its absence. */
+  | { kind: 'user'; login: string; scopes?: string[] }
+  | { kind: 'installation' }
 
 const UserSchema = z.object({ login: z.string().min(1) })
+
+/** `"repo, read:org"` as `['repo', 'read:org']`; an empty header — a classic token with no scope —
+ *  as `[]`; no header as null. */
+const scopesOf = (headers: unknown): string[] | null => {
+  const value = typeof headers === 'object' && headers !== null
+    ? (headers as Record<string, unknown>)['x-oauth-scopes']
+    : undefined
+  if (typeof value !== 'string') return null
+  return value.split(',').map((s) => s.trim()).filter((s) => s !== '')
+}
 
 /** One read, and no write, decides it: `GET /user`. A user token is answered with the user, whose
  *  login the CLI needs anyway — to say who it will post as, and to find its own summary comment. An
@@ -276,14 +292,15 @@ const UserSchema = z.object({ login: z.string().min(1) })
  *  401 (a bad or expired token), a 5xx, or a network failure is thrown: none of them is an answer
  *  about what the token is. */
 export async function tokenIdentityOf(octokit: Octokit): Promise<TokenIdentity> {
-  let data: unknown
+  let res: { data: unknown; headers: unknown }
   try {
-    data = (await octokit.request('GET /user')).data
+    res = await octokit.request('GET /user')
   } catch (e) {
     if (statusOf(e) === 403) return { kind: 'installation' }
     throw e
   }
-  return { kind: 'user', login: UserSchema.parse(data).login }
+  const scopes = scopesOf(res.headers)
+  return { kind: 'user', login: UserSchema.parse(res.data).login, ...(scopes !== null && { scopes }) }
 }
 
 /** How to report, as a CLI flag or an SDK option says it (spec 0.2.0 §4.2, §5.2). */

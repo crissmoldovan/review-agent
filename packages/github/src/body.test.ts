@@ -399,6 +399,14 @@ describe('the automated-review line', () => {
     expect(line({ kind: 'cli', login: null })).toContain(' · run from the command line · ')
   })
 
+  it('says GitHub Actions ran it when the CLI ran in a workflow, with or without a login', () => {
+    // A workflow holding a person's token posts under their name, and one holding its own GITHUB_TOKEN
+    // knows no login (GET /user refuses an installation): both say where they ran.
+    expect(line({ kind: 'cli', login: 'alice', from: 'github-actions' })).toContain(' · run by @alice from GitHub Actions · ')
+    expect(line({ kind: 'cli', login: null, from: 'github-actions' })).toContain(' · run from GitHub Actions · ')
+    expect(line({ kind: 'cli', login: 'alice', from: 'command-line' })).toContain(' · run by @alice from the command line · ')
+  })
+
   it('says the SDK ran it, when an embedding service did', () => {
     expect(line({ kind: 'sdk' })).toContain(' · via the SDK · ')
   })

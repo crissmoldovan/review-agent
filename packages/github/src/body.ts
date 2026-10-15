@@ -63,10 +63,14 @@ export const PRODUCT_URL = 'https://github.com/crissmoldovan/review-agent'
 
 /** How a review was run, which the automated-review line says (spec 0.2.0 §5.6). The App's runner
  *  says `app`; the CLI says `cli` with the login of the token it posted with, when it knows it; an
- *  SDK host says `sdk`. */
+ *  SDK host says `sdk`.
+ *
+ *  `from` is where the CLI ran: a person's terminal, or a GitHub Actions workflow — which the CLI
+ *  reads off `GITHUB_ACTIONS`. It changes the WORDS and nothing else: what the review reports with is
+ *  decided from the token, never from a guess about the environment (spec 0.2.0 §2.2, §5.4). */
 export type ReviewVia =
   | { kind: 'app' }
-  | { kind: 'cli'; login?: string | null }
+  | { kind: 'cli'; login?: string | null; from?: 'command-line' | 'github-actions' }
   | { kind: 'sdk' }
 
 /** A GitHub login as GitHub allows one — letters, digits and single hyphens, at most 39 — or an App's
@@ -81,7 +85,8 @@ const howItRan = (via: ReviewVia): string => {
     case 'sdk': return 'via the SDK'
     case 'cli': {
       const login = via.login ?? ''
-      return GITHUB_LOGIN.test(login) ? `run by @${login} from the command line` : 'run from the command line'
+      const where = via.from === 'github-actions' ? 'from GitHub Actions' : 'from the command line'
+      return GITHUB_LOGIN.test(login) ? `run by @${login} ${where}` : `run ${where}`
     }
   }
 }

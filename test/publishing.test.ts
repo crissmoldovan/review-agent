@@ -1,9 +1,9 @@
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SHIP_SOURCEMAPS as APP_SOURCEMAPS } from '../packages/app/sourcemaps'
 import { SHIP_SOURCEMAPS as CLI_SOURCEMAPS } from '../packages/cli/sourcemaps'
@@ -336,6 +336,22 @@ describe('what a published tarball carries', () => {
     for (const p of packed) {
       expect(p.manifest.publishConfig?.access, `${p.name} publishConfig.access`).toBe('public')
     }
+  })
+
+  it('answers --version from the packed CLI with the version it is published at (spec 0.2.0 §5.1)', () => {
+    // The tarball unpacked as npm would lay it out, and run from there: a version read off a file at
+    // run time would find no `../package.json` where the workspace has one, and fail only after
+    // publishing. The bundle's own dependencies are not in a tarball, so the workspace's are linked
+    // in beside it, which is where an install puts them.
+    const cli = packed.find((p) => p.dir === 'cli')
+    if (cli === undefined) throw new Error('the cli package was not packed')
+    const dir = mkdtempSync(join(destination, 'cli-unpacked-'))
+    // Run in the directory it extracts into, with a relative path: GNU tar reads `C:\…` as a host.
+    execFileSync('tar', ['-xzf', relative(dir, cli.tarball)], { cwd: dir })
+    symlinkSync(join(REPO, 'packages', 'cli', 'node_modules'), join(dir, 'package', 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir')
+    const printed = execFileSync(process.execPath, [join(dir, 'package', 'dist', 'index.js'), '--version'], { encoding: 'utf8' })
+    expect(printed.trim()).toBe(cli.version)
   })
 
   it('leaves the workspace root unpublishable', () => {

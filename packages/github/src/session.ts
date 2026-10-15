@@ -324,6 +324,12 @@ export async function runReviewSession(a: {
   deadlineMs?: number
   /** Leave the downloaded code where it is, and say where (spec 0.2.0 §3.3). */
   keepCheckout?: boolean
+  /** Buy the re-review pass over the previous review's findings, when there is a previous review
+   *  (spec 0.2.0 §5.2, the CLI's `--re-review`; on unless `false`). `false` still reads the previous
+   *  summary — this review edits it rather than posting a second, and carries its state on — but asks
+   *  nothing about it, so no earlier finding is judged resolved and the pass costs nothing. Read only
+   *  when posting: a review that posts nothing reads no previous summary at all. */
+  reReview?: boolean
   deps: SessionDeps
 }): Promise<SessionResult> {
   const { prepared } = a
@@ -476,7 +482,10 @@ export async function runReviewSession(a: {
       }
     }
     const publishExisting = existing === undefined ? {} : { existing }
-    const previousFindings = existing === undefined ? [] : recheckQuestions(existing?.marker ?? null).questions
+    // No question, no pass: `runReview` buys the re-review pass only for a non-empty list.
+    const previousFindings = existing === undefined || a.reReview === false
+      ? []
+      : recheckQuestions(existing?.marker ?? null).questions
 
     let review: RunReviewResult
     try {

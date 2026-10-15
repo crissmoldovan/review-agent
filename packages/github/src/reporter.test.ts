@@ -242,6 +242,18 @@ describe('tokenIdentityOf: one read decides what the token can report with', () 
     expect(gh.calls).toEqual([{ route: USER, params: {} }])
   })
 
+  it('keeps a classic token’s scope names from the same answer, and no header as no scopes', async () => {
+    const withScopes = {
+      request: async () => ({ status: 200, headers: { 'x-oauth-scopes': 'repo, read:org' }, data: { login: 'alice' } }),
+    } as unknown as Octokit
+    expect(await tokenIdentityOf(withScopes)).toEqual({ kind: 'user', login: 'alice', scopes: ['repo', 'read:org'] })
+    // A classic token with no scope at all sends the header empty: that is "none", not "unknown".
+    const noScope = {
+      request: async () => ({ status: 200, headers: { 'x-oauth-scopes': '' }, data: { login: 'alice' } }),
+    } as unknown as Octokit
+    expect(await tokenIdentityOf(noScope)).toEqual({ kind: 'user', login: 'alice', scopes: [] })
+  })
+
   it('knows an installation token by GitHub refusing it a user', async () => {
     const gh = fakeGitHub({ [USER]: { status: 403 } })
     expect(await tokenIdentityOf(gh.octokit)).toEqual({ kind: 'installation' })

@@ -396,6 +396,17 @@ describe('runReviewSession: a re-review (spec 0.2.0 §3.3)', () => {
     expect(only(gh.calls, SUMMARY_EDIT)[0].params.comment_id).toBe(9002)
   })
 
+  it('buys no re-review pass when told not to, and still edits the summary it found rather than posting a second (spec 0.2.0 §5.2)', async () => {
+    const gh = fakeGitHub({ issueComments: [summaryBy(9002, 'review-agent[bot]')] })
+    const { result, deps } = await session({ gh, reporter: checkRunReporter(), extra: { reReview: false } })
+    expect(deps.runRecheckPass).not.toHaveBeenCalled()
+    expect(expectKind(result, 'reviewed').record.recheckUsage).toBeNull()
+    expect(only(gh.calls, SUMMARY_EDIT)[0].params.comment_id).toBe(9002)
+    expect(only(gh.calls, SUMMARY_CREATE)).toEqual([])
+    // Nothing was asked, so nothing the earlier review said is judged resolved: its row stays open.
+    expect(decodeMarker(String(only(gh.calls, SUMMARY_EDIT)[0].params.body))?.runs[0].findings[0].outcome).toBe('open')
+  })
+
   it('edits the summary its own login posted, not another way in’s (decision §14.7)', async () => {
     const gh = fakeGitHub({ issueComments: [summaryBy(9002, 'review-agent[bot]'), summaryBy(9003, 'alice')] })
     await session({ gh, reporter: commitStatusReporter(), extra: { selfLogin: 'alice' } })

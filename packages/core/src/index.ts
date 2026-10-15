@@ -3,6 +3,9 @@ export * from './check-pass'
 // cli-process stays internal: CHILD_ENV_ALLOWLIST is a security boundary, not an interface, and
 // nothing outside core has a reason to read it. The refusal every caller must make (Criss, 2026-09-14,
 // decision 10) lives in runtime.ts with the rest of the credential rules, and is exported from there.
+// `resolveClaudeBinary` alone is exported, for `review-agent doctor` (spec 0.2.0 §5.1): it says which
+// Claude Code a review would run — or why none — by the very rule a review applies, not by a copy.
+export { resolveClaudeBinary } from './cli-process'
 export * from './config'
 // Named rather than `export *`, so that what the three passes share to start Claude (`runClaude`, the
 // prompt-file threshold) stays inside this package.

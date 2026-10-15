@@ -58,8 +58,11 @@ describe('runFocusedReviews — one reviewer per focus (spec 0.2.0 §8.3)', () =
     const all = spawned()
     expect(all.map(focusOf).sort()).toEqual(['impact', 'intent', 'security'])
     // The same read-only rules: what differs between them is the focus line of the system prompt, and
-    // nothing else on the command line.
-    const withoutPrompt = (s: Spawned): string[] => s.argv.filter((_, i) => s.argv[i - 1] !== '--append-system-prompt')
+    // nothing else on the command line. The prompt's VALUE is left out of the comparison and its flag
+    // kept, whichever way it was sent: inline, or — on Windows, and past 16,000 characters — as a
+    // file, where each focus writes its own private temp file and so its own path (engine.ts).
+    const PROMPT_FLAGS = ['--append-system-prompt', '--append-system-prompt-file']
+    const withoutPrompt = (s: Spawned): string[] => s.argv.filter((_, i) => !PROMPT_FLAGS.includes(s.argv[i - 1]))
     for (const s of all) {
       expect(realpathSync(s.cwd)).toBe(realpathSync(checkout))
       expect(s.stdin).toBe('Review this pull request.')

@@ -114,7 +114,8 @@ failure does not sink the rest.
 
 **Who may ask.** It runs only when somebody asks — a `/review --multi` comment, or the **Re-run** button on a review
 that ran it — and, in the App, only for someone with push access, like every requested review. An automatic review
-never runs it. `allowMulti: false` switches it off for a deployment. The CLI has no `--multi` flag yet.
+never runs it. `allowMulti: false` switches it off for a deployment. From the command line it is
+`review-agent review --multi` ([the CLI](cli.md#options)).
 
 ### Reporting modes
 

@@ -15,7 +15,8 @@ reports what it finds:
 - on later reviews of the same pull request, which earlier findings are **no longer there**.
 
 As a GitHub App it posts a summary comment, inline comments with `suggestion` blocks, and a check run that can gate
-merges if you want it to. From the command line it prints the same review without posting anything.
+merges if you want it to. From the command line it prints the same review, or with `--post` posts it as you, with a
+commit status.
 
 ```
 /review --tier normal
@@ -32,11 +33,11 @@ The retry logic moved into the client. Check every caller still handles a 429.
 - **Proven on real code:** read-only reviews of real pull requests for cost and quality measurement, and reviews
   posted to a real pull request through the deployed runner.
 - **New and not yet proven live:** the [re-review pass](docs/pull-requests.md#re-reviews) that asks the model
-  whether earlier findings are still present, and the [multi-reviewer mode](docs/configuration.md#the-multi-reviewer-mode)
-  (`/review --multi`: three focused reviewers, one check pass that also merges duplicates). Both are covered by unit
-  tests only; the multi-reviewer mode's cost is not measured yet.
-- **Not built yet:** a GitHub Action mode, posting from the CLI, `--multi` in the CLI, and changing the runner's
-  settings without editing one function.
+  whether earlier findings are still present, the [multi-reviewer mode](docs/configuration.md#the-multi-reviewer-mode)
+  (`/review --multi`: three focused reviewers, one check pass that also merges duplicates), and posting from the CLI
+  (`review-agent review --post`, with a commit status). All are covered by unit tests only; the multi-reviewer mode's
+  cost is not measured yet.
+- **Not built yet:** a GitHub Action mode, and changing the runner's settings without editing one function.
 - **The same model varies from run to run.** One review is a sample.
 
 ## Quick start: review a pull request from your terminal
@@ -47,14 +48,29 @@ token that can read the repository, and an Anthropic credential (or a logged-in 
 ```sh
 npm install --global @review-agent/cli
 
-export GITHUB_TOKEN=…            # Contents: Read and Pull requests: Read on the repository
+export GITHUB_TOKEN=…            # or GH_TOKEN, or a logged-in `gh`; Contents: Read and Pull requests: Read
 export ANTHROPIC_API_KEY=…       # or CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`, or neither if `claude` is logged in
 
+review-agent doctor              # checks all of the above
 review-agent review --repo owner/name --pr 123
 ```
 
+In PowerShell, set the variables with `$env:GITHUB_TOKEN = "…"` and `$env:ANTHROPIC_API_KEY = "…"`; the commands are
+the same.
+
 It prints the summary, every finding with its severity and the check pass's verdict, and what the review cost.
-`--json` prints the full record instead. Every flag: [the CLI reference](docs/cli.md).
+`--json` prints the full record instead.
+
+**Post it.** Add `--post` and the review goes on the pull request — a summary comment, inline comments and a commit
+status — **as whoever the token belongs to**, with a first line saying it is automated. At a terminal it asks before
+posting; the token then also needs Pull requests: Write and Commit statuses: Write.
+
+```sh
+review-agent review --repo owner/name --pr 123 --post
+```
+
+A commit status is a soft gate: anyone with push access can set one with the same name. For a gate that holds, use the
+GitHub App below. Every flag: [the CLI reference](docs/cli.md).
 
 ## Quick start: review every pull request with a GitHub App
 
