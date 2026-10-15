@@ -6,9 +6,8 @@ between (use case UC-7 in [the 0.2.0 spec](../specs/0.2.0-ways-in.md#1-use-cases
 opens or leaves draft, when someone with push access comments `/review`, and when the check run's **Re-run** button is
 pressed, and posts as the App: a review with inline comments, a summary comment and a check run named `review-agent`.
 
-<!-- capture: a screenshot of a demo pull request reviewed by an App served from this example — the
-"review-agent" check run, the summary comment from the App's bot account, and one inline comment. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: it needs a GitHub App registered with `review-agent init` and this example's server running where
+GitHub can reach it; the 0.2.0 captures (2026-10-15) include no such run.*
 
 The server is [`examples/server`](../../examples/server/README.md): the webhook receiver, an in-process queue and the
 SDK in one Node.js process. Read [how it differs from the App deployment](../../examples/server/README.md#how-it-differs-from-the-app-deployment)
@@ -51,9 +50,7 @@ npx @review-agent/cli@0.2.0 init --name "Acme Reviewer" --url https://example.co
 Open the `http://127.0.0.1:<port>` address it prints, press the button, and confirm on GitHub. Leave out `--org` to
 register the App under your own account.
 
-<!-- capture: the lines `review-agent init` prints after the App is created — the App id, slug, client id
-and the permissions GitHub stored — with the ids replaced by placeholders. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet, for the same reason: the 0.2.0 captures include no App served from this example.*
 
 Then, on the App's settings page (**General**) — each step is in [after registering](../github-app.md#after-registering):
 
@@ -257,13 +254,9 @@ delivery instead: it is answered the same way.) The server answers `204`, and lo
    docker logs --follow review-agent
    ```
 
-<!-- capture: the server's log lines for one review of a demo pull request at tier basic, from
-"review queued" to "review finished" (findings, costUsd, conclusion, summaryUrl). Version and date. -->
-*(captured output will appear here)*
+*Not captured yet, for the same reason: the 0.2.0 captures include no App served from this example.*
 
-<!-- capture: the summary comment, one inline comment and the check run that review posted, as GitHub shows
-them. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet, for the same reason: the 0.2.0 captures include no App served from this example.*
 
 Then install it on more repositories.
 

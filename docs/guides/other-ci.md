@@ -9,8 +9,9 @@ or as **your own GitHub App**, reporting with a check run a branch rule can pin 
 It is the same review as everywhere else: the CLI, run in a job, with `--post`. Nothing here is a plugin; every
 snippet is the CI's own configuration around the same three commands.
 
-<!-- capture: other-ci-pr-screenshot — a screenshot of a demo pull request reviewed by the bot-account run below (other-ci-bot-token-log): the summary comment from the bot account, an inline comment if any, and the `review-agent` commit status. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: it needs a separate bot account with its own token, or a GitHub App installed on the demo repository,
+and neither was set up for these captures (2026-10-15). The same review posted by a person is shown in [post a review as
+yourself](post-as-yourself.md).*
 
 ## What you need
 
@@ -142,11 +143,11 @@ has the App's three values instead of `GITHUB_TOKEN`, runs `npm install --no-sav
   writes on stderr what it is about to post, and as whom — *"This will post as @review-bot on acme/widgets#128: a review
   with inline comments, a summary comment and a commit status "review-agent"."* — so the log shows it.
 
-<!-- capture: other-ci-bot-token-log — stdout and stderr, in order, of the two commands above run without a terminal (stdin from /dev/null) in a node:22-bookworm-slim container, against crissmoldovan/review-agent-demo pull request #7 (feat/order-notes, the clean one), with a bot account's fine-grained token as GITHUB_TOKEN. Replace the bot's login with @review-bot. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: it needs a bot account and its fine-grained token, which were not set up for these captures
+(2026-10-15).*
 
-<!-- capture: other-ci-app-token-log — the same, with `node review-with-app.mjs` in place of the two commands and an App installation for the demo repository: it shows whether `GET /user` sent the review to a check run (the "reported with a check run: …" line). Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: it needs a GitHub App installed on the demo repository, which was not set up for these captures
+(2026-10-15) — so whether `GET /user` sends an App's review to a check run here has not been seen in a log.*
 
 ### The exit code
 

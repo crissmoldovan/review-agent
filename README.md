@@ -132,7 +132,14 @@ Model spend at **per-token API prices** (what an Anthropic API key is billed), *
 | its check pass | $0.07–0.58 | 13 seconds to about 2 minutes |
 | a `normal` review (`medium` effort), before the check pass | $1.57–1.67 | 4–7 minutes |
 | a whole `basic` review, check pass included, of a one-file pull request | $0.16–0.29 | |
-| the re-review pass on a later review | about $0.10 — **an estimate**, not yet measured | |
+| the re-review pass on a later review | about $0.10 — **an estimate** made before it ran; measured once since (below) | |
+| a whole `basic` or `normal` review, check pass included, of the [demo repository](https://github.com/crissmoldovan/review-agent-demo)'s small pull requests — **measured 2026-10-15**, per-token API prices | $0.20–0.44 `basic` (5 runs); $0.56–0.62 `normal` (2 runs) | the reviewer: 27–50 seconds `basic`, 75–89 seconds `normal` |
+| a whole `thorough` review, check pass included, of a small demo pull request — **measured 2026-10-15**, per-token API prices, with the soft budget lowered to $4 (`--budget 4`) | $0.62–0.89 (2 runs) | the reviewer: 93–132 seconds |
+| a whole `--multi` review at `basic` — three focused reviewers and one check pass — of a small demo pull request — **measured 2026-10-15**, per-token API prices, with each reviewer's budget lowered to $1 (`--budget 1`) | $0.67–0.72 (2 runs) | the three reviewers: 86–116 seconds added up |
+| the re-review pass on a later review of a small demo pull request — **measured once, 2026-10-15**, per-token API prices | $0.16, inside a whole `basic` review of $0.49 | |
+
+Every run on the demo repository, with its check pass and findings: [what the runs
+cost](docs/guides/choosing-a-tier.md#what-the-runs-cost).
 
 Cost follows how much the reviewer explores, not the size of the diff. Each pass has a hard ceiling: $5.00 for a
 `basic` review and $1.25 for each extra pass. With a Claude subscription token the same amounts are drawn from the

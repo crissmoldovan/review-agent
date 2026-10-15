@@ -5,10 +5,8 @@ and anyone with push access can ask for another review by commenting `/review`. 
 and no server to run: the workflow installs Claude Code and the `review-agent` CLI and runs one review per pull
 request, posting as `github-actions[bot]` (use case UC-4 in [the 0.2.0 spec](../specs/0.2.0-ways-in.md#1-use-cases)).
 
-<!-- capture: a screenshot of a pull request in the demo repository after the workflow ran — the
-"review-agent" check run in the checks list, the summary comment from github-actions[bot], and one inline
-comment. Label it with the review-agent version and the date it was captured. -->
-*(captured output will appear here)*
+*Not captured yet: the workflow has not run on the demo repository, which had no `ANTHROPIC_API_KEY` secret (and no
+workflow file) when these guides were captured, 2026-10-15. What it posts is described below from the code, not shown.*
 
 What it posts on each reviewed pull request:
 
@@ -97,16 +95,13 @@ A review takes a few minutes. On the pull request:
 2. The summary comment from `github-actions[bot]` says what was found and what it cost.
 3. Inline comments sit on the lines they are about.
 
-<!-- capture: the summary comment and one inline comment posted by github-actions[bot] on a demo
-pull request at tier basic, exactly as GitHub shows them; and the check run's page. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: it needs a run of the workflow on the demo repository, which has not happened (see the top of this
+guide).*
 
 The job's log, under **Actions → review-agent → the run**, shows what the CLI did. Its last lines say what was posted
 and how it was reported:
 
-<!-- capture: the last lines of the "Review and post" step's log from the same run — the "posted …"
-and "reported with a check run: …" lines and the cost line. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet, for the same reason: no run of the workflow on the demo repository.*
 
 **If you see this instead**
 
@@ -189,7 +184,7 @@ What a required check asks of every pull request:
 
 | What | Who charges | How much |
 |---|---|---|
-| The model | Anthropic, to the API key — **per-token API prices** | **measured** with `claude-opus-5`: $0.88–1.06 for a `basic` review of a real production pull request; $0.16–0.29 for a one-file pull request, check pass included; $1.57–1.67 for a `normal` review before its check pass. `thorough`: not measured. Hard ceilings: $5.00 `basic`, $7.50 `normal`, $20.00 `thorough` ([what it costs](../../README.md#what-it-costs)) |
+| The model | Anthropic, to the API key — **per-token API prices** | **measured** with `claude-opus-5`: $0.88–1.06 for a `basic` review of a real production pull request; $0.16–0.29 for a one-file pull request, check pass included; $1.57–1.67 for a `normal` review before its check pass. `thorough`: $0.62–0.89 in all on the demo's small pull requests (measured 2026-10-15, with `--budget 4`: [the runs](choosing-a-tier.md#what-the-runs-cost)), not yet on a production pull request. Hard ceilings: $5.00 `basic`, $7.50 `normal`, $20.00 `thorough` ([what it costs](../../README.md#what-it-costs)) |
 | The runner | GitHub, at **GitHub's price** for your plan | free on GitHub-hosted runners for public repositories. A job lasts about as long as its review — 2–7 minutes measured for `basic` and `normal` — plus installing two npm packages, **not measured** |
 
 Each summary comment says what its review cost. A single review is a sample, not a verdict: the same model can find

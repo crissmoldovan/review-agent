@@ -19,8 +19,7 @@ the App: a review with inline comments, a summary comment and a check run named 
 This is the [App deployment](../deploying.md) with its receiver on Vercel; the runner is the same. The half on the
 internet holds no App key and no model credential, so the worst a compromised route can do is start reviews.
 
-<!-- capture: vercel-pr-screenshot — a screenshot of a demo pull request reviewed by an App whose receiver is this guide's route on Vercel and whose runner is on trigger.dev: the `review-agent` check run, the summary comment from the App's bot account, and one inline comment. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: no Vercel deployment was made for the 0.2.0 release, and this guide has not been run end to end.*
 
 ## Why the review does not run in a Vercel Function
 
@@ -87,8 +86,7 @@ register the App under your own account. Then, on the App's settings page — ea
 
 Do not install the App yet.
 
-<!-- capture: vercel-init-stdout — the lines `review-agent init` prints after the App is created — the App id, slug, client id and the permissions GitHub stored — with the ids replaced by placeholders. The self-hosting guide's capture of the same command may be reused. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: no Vercel deployment was made for the 0.2.0 release.*
 
 **If you see this instead**
 
@@ -240,8 +238,7 @@ curl.exe -i -X POST https://reviewer-acme.vercel.app/api/github/webhook
 The answer is `401` with the body `bad signature`, and the project's logs on Vercel show
 `delivery refused: missing-header`.
 
-<!-- capture: vercel-route-401 — the status line and body of that curl against the deployed demo receiver, with Vercel's own response headers trimmed to the ones that do not identify the deployment; and the matching log line from the Vercel project's logs. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: no Vercel deployment was made for the 0.2.0 release.*
 
 **If you see this instead**
 
@@ -259,8 +256,7 @@ On the App's settings page, check that **Webhook URL** is the route's production
 when the App was registered and press **Redeliver**. The route answers `204`: the delivery was understood and needed
 nothing.
 
-<!-- capture: vercel-redeliver-ping — a screenshot of the App's Recent Deliveries after redelivering the ping, with the 204 response visible. -->
-*(captured output will appear here)*
+*Not captured yet: no Vercel deployment was made for the 0.2.0 release.*
 
 | Symptom | Fix |
 |---|---|
@@ -276,8 +272,7 @@ nothing.
 4. On the pull request: a `review-agent` check run, then the summary comment and any inline comments. What they mean:
    [using it on pull requests](../pull-requests.md).
 
-<!-- capture: vercel-trigger-run — a screenshot of the trigger.dev run page for one review of a demo pull request started through the Vercel route: the run's status, duration and its output's `kind`. Version and date. -->
-*(captured output will appear here)*
+*Not captured yet: no Vercel deployment was made for the 0.2.0 release.*
 
 Then install it on more repositories.
 

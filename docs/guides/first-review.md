@@ -8,13 +8,33 @@ posted anywhere.** The review is printed, and only you see it (use case UC-2 in
 
 The five minutes are the review and reading it; installing what it needs takes as long as your downloads do.
 
-The pull request is #2 of the public demo repository
+The pull request is #8 of the public demo repository
 [`crissmoldovan/review-agent-demo`](https://github.com/crissmoldovan/review-agent-demo), a small orders API whose pull
-requests carry known problems. #2, `feat/currency-display`, has a bug in how it formats Japanese yen (JPY). Whether
+requests carry known problems. #8, `feat/currency-display`, has a bug in how it formats Japanese yen (JPY). Whether
 the review finds it is what you are about to see: one review is a sample, not a verdict.
 
-<!-- capture: first-review-pr2-stdout — stdout of `review-agent review --repo crissmoldovan/review-agent-demo --pr 8` on macOS, full, with ANTHROPIC_API_KEY set and a `gh` login. Label it with the review-agent version, the Claude Code version and the date. The same run may serve as tier-basic-pr2-stdout. -->
-*(captured output will appear here)*
+This is what `review-agent review --repo crissmoldovan/review-agent-demo --pr 8` printed — the whole of stdout (stderr
+was empty):
+
+```text
+crissmoldovan/review-agent-demo#8 at ff7bcec — tier basic, claude-opus-5, effort low
+
+Adds `src/format.ts` with `formatMoney()` (en-US, sign before symbol) plus unit tests, and includes a `totalDisplay` string alongside the integer `total` in the single-order response. The integer `total` is preserved, and the comment correctly warns nothing should parse the display string back. Two gaps against the brief: `formatMoney` divides by 100 for all currencies, so JPY totals render 100x too small, and `serializeOrderSummary` (used by `GET /orders`) was not updated, so the console still needs its own formatter.
+
+intent: partial — formatMoney and its tests exist as described, and serializeOrder gained totalDisplay. But the brief's "every order response" and "the console can drop its own formatter" are not met: GET /orders summaries (and refunds) still return raw integers only. formatMoney is also wrong for JPY, a currency the service accepts.
+
+  [7/10 correctness] src/format.ts:16 formatMoney hardcodes 2 minor units, so JPY amounts are 100x too small [check: confirmed]
+  [5/10 intent] src/http/serialize.ts:36 Brief says "every order response" carries totalDisplay, but the list response does not [check: confirmed]
+  [3/10 intent] src/http/serialize.ts:46 Refund responses still carry an unformatted total [check: confirmed]
+  [3/10 correctness] src/format.ts:15 Negative amounts between -0.005 and 0 would print "-" with a zero value [check: refuted]
+  [?] Are JPY orders actually created in practice, or is JPY dead configuration? — would be settled by: Order-creation validation or fixtures showing whether JPY is reachable; `isCurrency` suggests it is, but no JPY order fixture was read.
+  [?] Does the console actually read totalDisplay and drop its formatter in this PR's companion client change? — would be settled by: The console/client source, which is not in this checkout.
+
+$0.25 model spend at per-token API prices · 7 turns · 38s · check $0.11
+```
+
+*Captured 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · Claude Code 2.1.289 on macOS · paid with
+the machine's Claude login (a subscription's allowance); the dollar figures are model spend at per-token API prices.*
 
 ## What you need
 
@@ -225,11 +245,31 @@ logged in without starting a session. The two `!` lines at the end are about pos
 Leave out `--repo` for now: its checks are whether you could post on that repository, and only its owner can post on
 the demo repository.
 
-<!-- capture: first-review-doctor-stdout — stdout of `review-agent doctor` on macOS, with a `gh` login and ANTHROPIC_API_KEY set, full. Replace the login with @alice if it is not the demo repository's owner. Version and date. -->
-*(captured output will appear here)*
+The real output, from the machine these guides were captured on — a `gh` login, and Claude Code's own login rather
+than a key:
 
-<!-- capture: first-review-doctor-windows-stdout — stdout of `review-agent doctor` in PowerShell on Windows (native, not WSL), with a `gh` login and ANTHROPIC_API_KEY set, full — it shows where the claude.exe it found lives. Version and date. -->
-*(captured output will appear here)*
+```text
+✓ Node.js 26.7.0
+✓ Claude Code: /opt/homebrew/bin/claude
+✓ Claude Code version: 2.1.289 (Claude Code)
+✓ ANTHROPIC_BASE_URL is not set
+! model credential: none set, so Claude Code's own login (`claude login`) will be used — doctor cannot tell whether it is logged in without starting a session; a review that is not says "Not logged in"
+✓ GitHub token: from the GitHub CLI's login for github.com (gh auth token)
+✓ GitHub identity: @crissmoldovan — scopes: admin:org, gist, read:packages, repo, workflow — a classic token or a gh login reaches every repository @crissmoldovan can, within its scopes
+! no --repo given: what this token can do on a repository was not checked (review-agent doctor --repo owner/name)
+! report: a commit status "review-agent" — a soft gate: a branch rule cannot pin it to this reviewer, so anyone with push access could set one with the same name. For a gate that holds, run it from GitHub Actions or the App
+
+Ready for `review-agent review --post`.
+```
+
+*Captured 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · Claude Code 2.1.289 on macOS · exit code
+`0`. doctor makes no model call, so nothing was spent.*
+
+*Not captured yet on Windows: no Windows machine with a Claude login was available for these captures. Windows is
+covered by CI instead — the `claude smoke, $0 (windows-latest)` job in
+[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) installs the real Claude Code and runs it through the
+reviewer with no credential, at $0 ([CHANGELOG](../../CHANGELOG.md)). doctor prints the same checks on Windows; its
+`Claude Code:` line names the `claude.exe` it found, and some `fix:` lines give the PowerShell form.*
 
 **If you see this instead**
 
@@ -255,13 +295,12 @@ The reviewer reads the pull request, downloads the repository at its head commit
 credential-shaped files removed — and runs Claude Code over it with read-only tools (Read, Grep and Glob: no shell).
 A second pass then tries to disprove each finding. It may print a note on stderr while it works, such as a file it
 removed from the download; otherwise nothing appears until it finishes. A `basic` review of a real pull request took
-2–5 minutes when measured.
+2–5 minutes when measured; this one, of the demo's small pull request, took 60 seconds end to end (2026-10-15).
 
 Nothing is written to GitHub, and the downloaded code is deleted when the review ends. **Ctrl-C** stops the review and
 the Claude process with it; a second Ctrl-C exits at once.
 
-<!-- capture: first-review-pr2-terminal — a screenshot of the terminal at the end of the same run as first-review-pr2-stdout, showing the command and the whole output. -->
-*(captured output will appear here)*
+It prints the review shown at [the top of this guide](#your-first-review-in-five-minutes).
 
 **If you see this instead**
 
@@ -353,14 +392,34 @@ The fields you will read most:
 
 `output` is `null` when the model produced nothing usable.
 
-<!-- capture: first-review-pr2-json — the output of the three jq commands above for one `--json` run of PR #8 on macOS, and the same three PowerShell lines' output on Windows if run there. Version and date. -->
-*(captured output will appear here)*
+The three `jq` commands, run on the `--json` record of a second review of #8:
+
+```text
+$ jq '.costUsd' review.json
+0.2988815
+$ jq -r '.output.findings[] | "\(.severity)/10 \(.file):\(.line) \(.title)"' review.json
+7/10 src/format.ts:16 formatMoney assumes 2 minor units, so JPY is formatted wrong
+5/10 src/http/serialize.ts:36 `GET /orders` summaries have no `totalDisplay`, so the console cannot drop its formatter
+3/10 src/format.ts:17 Float division loses precision for very large amounts
+$ jq -r '.checkVerdicts[]? | "#\(.index) \(.verdict) at \(.severity)/10"' review.json
+#0 confirmed at 6/10
+#1 confirmed at 4/10
+#2 refuted at 1/10
+```
+
+*Captured 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · Claude Code 2.1.289 on macOS · read with
+jq 1.7.1 · paid with the machine's Claude login (a subscription's allowance); `costUsd` is model spend at per-token API
+prices. Not captured on Windows, so the PowerShell lines' output is not shown.*
+
+This second run found three things where the first, at the top of this guide, found four — one review is a sample. The
+severities in `output.findings` are the reviewer's own; the check pass gave its own, and refuted the third finding (`#2
+refuted at 1/10`), which a posted review would therefore leave out.
 
 ## What it costs
 
 | What | Who charges | How much |
 |---|---|---|
-| The model, with an API key | Anthropic — **per-token API prices** | **measured** with `claude-opus-5`: $0.88–1.06 for a `basic` review of a real production pull request, plus $0.07–0.58 for its check pass; $0.16–0.29 for a whole `basic` review of a one-file pull request, check pass included ([what it costs](../../README.md#what-it-costs)). Hard ceilings at `basic`: $5.00 for the review and $1.25 for its check pass. Each `--json` run in step 8 is another review |
+| The model, with an API key | Anthropic — **per-token API prices** | **measured** with `claude-opus-5`: $0.88–1.06 for a `basic` review of a real production pull request, plus $0.07–0.58 for its check pass; $0.16–0.29 for a whole `basic` review of a one-file pull request, check pass included ([what it costs](../../README.md#what-it-costs)); $0.25 and $0.30 for the two whole reviews of demo #8 above (measured 2026-10-15). Hard ceilings at `basic`: $5.00 for the review and $1.25 for its check pass. Each `--json` run in step 8 is another review |
 | The model, with a subscription | your subscription — **its allowance** | the same amounts, drawn from the subscription's allowance rather than billed per token |
 | GitHub | — | reading a pull request through GitHub's API is not charged; it counts against your account's API rate limit |
 
