@@ -792,7 +792,7 @@ describe('runReviewCommand: a multi-reviewer review printed (spec 0.2.0 §8.3)',
     const out = d.out.join('')
     expect(out).toContain('tokens signed with a previous key never expire')
     expect(out).not.toContain('previous-key tokens are accepted after they expire')
-    expect(out).toMatch(/never expire \[check: confirmed · also found by security\]/)
+    expect(out).toMatch(/\[6\/10 security · intent reviewer\] .*never expire \[check: confirmed · also found by security\]/)
     expect(out).toContain('1 duplicate merged')
     expect(out).toContain('the refresh route still uses the bare secret')
   })

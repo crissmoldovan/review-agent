@@ -341,7 +341,9 @@ const render = (review: RunReviewResult): string => {
         ...(verdict === undefined ? [] : [`check: ${verdict.verdict}`]),
         ...(also.length === 0 ? [] : [`also found by ${also.join(', ')}`]),
       ]
-      const focus = finding.lens === undefined ? '' : ` · ${finding.lens}`
+      // The focus that found it, when it says something the category does not (`impact` found by the
+      // impact reviewer needs no second word).
+      const focus = finding.lens === undefined || finding.lens === finding.category ? '' : ` · ${finding.lens} reviewer`
       lines.push(`  [${finding.severity}/10 ${finding.category}${focus}] ${finding.file}:${finding.line} ${finding.title}` +
                  (notes.length === 0 ? '' : ` [${notes.join(' · ')}]`))
     })
