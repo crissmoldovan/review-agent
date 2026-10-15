@@ -210,6 +210,10 @@ When a pull request that has been reviewed is reviewed again (by `/review` or **
 A comment is only ever appended to, never deleted, and only the reviewer's own comments on this pull request are
 edited. `cannot-tell`, or no answer, leaves a finding as it was.
 
+A problem the new review finds again is **posted again**: a later review posts its own inline comments, even on the
+same commit and line, in its own words. Only low findings (below 4) are held back on later reviews, unless the
+deployment sets `report.repeatNits`. So a second review of an unchanged commit repeats the first.
+
 This pass costs extra: its own target is a quarter of the review's soft budget, and its own ceiling 2.5 times that —
 $0.50 and $1.25 on `basic` ([budgets](configuration.md#budgets)) — and it runs only when that ceiling still fits under
 the review's ceiling after what the review and its check pass have spent. A first review never pays for it.

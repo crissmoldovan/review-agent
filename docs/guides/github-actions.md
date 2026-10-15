@@ -179,6 +179,44 @@ While a review of a pull request is running, a second request waits for it rathe
 review has already been paid for. One request waits at most; a newer one takes its place before it has spent
 anything.
 
+This is what a `/review` on the demo's pull request #14 printed in the **Review and post** step, the pull request
+having been reviewed once already, at the same commit:
+
+```text
+This will post as this token's GitHub App installation on crissmoldovan/review-agent-demo#14: a review with inline comments, a summary comment and a check run "review-agent" (a commit status, if the token cannot create one).
+review published
+crissmoldovan/review-agent-demo#14 at c85133f — tier basic, claude-opus-5, effort low
+
+The PR adds `formatMoney()` in src/format.ts and attaches a human-readable `totalDisplay` to the single-order response, with unit tests. The formatter hardcodes a divide-by-100 and two fraction digits, which is wrong for JPY, declared with `minorUnits: 0` in src/money.ts — a JPY total renders 100x too small. It also only covers `serializeOrder`; `serializeOrderSummary` (GET /orders) and `serializeRefund` still return bare integers, so the console cannot drop its own formatter as the brief states.
+
+intent: partial — formatMoney and totalDisplay on the single-order response are implemented as described, but the list endpoint still lacks totalDisplay, and the formatter is wrong for JPY.
+
+  [7/10 correctness] src/format.ts:16 formatMoney divides every currency by 100, breaking JPY (0 minor units) [check: confirmed, was 8/10]
+  [4/10 intent] src/http/serialize.ts:36 Order list responses still have no totalDisplay [check: confirmed, was 5/10]
+  [?] Is `Currency` used for a currency whose minor units differ from 2 in production data today (e.g. are JPY orders actually created)? — would be settled by: Checking order-creation validation/fixtures or production data for JPY usage; the type system already permits it.
+
+$0.29 model spend at per-token API prices · 5 turns · 22s · check $0.09 · re-review $0.08
+
+posted 1 inline comment and a summary comment: https://github.com/crissmoldovan/review-agent-demo/pull/14#issuecomment-6186154495
+reported with a check run: success (https://github.com/crissmoldovan/review-agent-demo/runs/116298848293)
+```
+
+*Captured 2026-10-15 · review-agent 0.2.2 · Claude Code 2.1.258 on `ubuntu-latest` · a `/review` comment on demo pull
+request #14, run by the [example workflow](../../examples/github-actions/review.yml) from the default branch · paid with
+the demo repository's API key: $0.29 model spend at per-token API prices, of which $0.08 was the
+[re-review pass](../pull-requests.md#re-reviews).* The job took 53 seconds: 5 to install, 44 to review and post.
+
+What it shows:
+
+- The comment passed both checks — its author owns the repository — and the review ran at the default tier.
+- The summary comment is the **same comment**, edited in place (the URL is the first review's).
+- The re-review pass asked about the first review's findings. The JPY problem was still in the code, so nothing was
+  marked "No longer reported".
+- **A problem still in the code is posted again.** The JPY finding went up as a second inline comment on the same
+  line, under the new review's wording. Only low findings are held back on a later review
+  ([`report.repeatNits`](../configuration.md)), so ask for another review when the code has changed, not to
+  re-read the same commit.
+
 ## Pull requests from forks
 
 GitHub gives a `pull_request` run from a fork no secrets and a read-only token, so the review could not run, and could
