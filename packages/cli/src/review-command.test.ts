@@ -770,3 +770,30 @@ describe('runReviewCommand --post: Ctrl-C after the status was set pending', () 
     expect(d.err.join('\n')).toContain('the commit status says the review was interrupted')
   })
 })
+
+describe('runReviewCommand: a multi-reviewer review printed (spec 0.2.0 §8.3)', () => {
+  it('says each duplicate once, naming the other focuses that found it, as posting does', async () => {
+    const expiry: Finding = { ...FINDING, title: 'tokens signed with a previous key never expire', lens: 'intent' }
+    const sameExpiry: Finding = { ...FINDING, title: 'previous-key tokens are accepted after they expire', lens: 'security' }
+    const other: Finding = { ...FINDING, line: 101, title: 'the refresh route still uses the bare secret', lens: 'impact' }
+    const output: ReviewOutput = { ...OUTPUT, findings: [expiry, other, sameExpiry] }
+    const d = deps({
+      runEngine: vi.fn(async () => ({ ...RESULT, output })),
+      runCheckPass: vi.fn(async () => ({
+        verdicts: [
+          { index: 0, verdict: 'confirmed', severity: 9, reason: 'r', evidence: [], duplicateOf: null },
+          { index: 1, verdict: 'confirmed', severity: 8, reason: 'r', evidence: [], duplicateOf: null },
+          { index: 2, verdict: 'confirmed', severity: 9, reason: 'r', evidence: [], duplicateOf: 0 },
+        ] as CheckVerdict[],
+        usage: CHECK_USAGE,
+      })),
+    })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16' }, d)).toBe(0)
+    const out = d.out.join('')
+    expect(out).toContain('tokens signed with a previous key never expire')
+    expect(out).not.toContain('previous-key tokens are accepted after they expire')
+    expect(out).toMatch(/never expire \[check: confirmed · also found by security\]/)
+    expect(out).toContain('1 duplicate merged')
+    expect(out).toContain('the refresh route still uses the bare secret')
+  })
+})

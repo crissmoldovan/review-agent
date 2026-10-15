@@ -4,7 +4,7 @@ import {
   type ModelCredential, type ReportMode, type ReviewRecord,
 } from '@review-agent/core'
 import {
-  noReporter, prepareReview, reporterFor, runReviewSession, tokenIdentityOf,
+  duplicatesIn, noReporter, prepareReview, reporterFor, runReviewSession, tokenIdentityOf,
   type PublishedReview, type Reporter, type ReviewAsk, type ReviewVia, type RunReviewDeps,
   type RunReviewResult, type SessionReport, type SessionResult, type TokenIdentity,
 } from '@review-agent/github'
@@ -318,11 +318,36 @@ const render = (review: RunReviewResult): string => {
   if (result.output !== null) {
     lines.push('', result.output.summary, '',
                `intent: ${result.output.intent.verdict} — ${result.output.intent.note}`, '')
-    result.output.findings.forEach((finding, i) => {
+    // A multi-reviewer review's duplicates are said once, as posting says them (spec 0.2.0 §8.3, decision
+    // 17): the finding the check pass kept is listed, with the other focuses that found it too. The
+    // full list, duplicates included, stays on the record (`--json`). Measured 2026-10-15: the first
+    // captured `--multi` review printed two of its findings twice before this.
+    const findings = result.output.findings
+    const duplicates = duplicatesIn(check === null ? null : { findings, verdicts: check.verdicts })
+    const alsoFoundBy = new Map<number, Set<string>>()
+    for (const v of check?.verdicts ?? []) {
+      if (!duplicates.has(v.index) || typeof v.duplicateOf !== 'number') continue
+      const lens = findings[v.index]?.lens
+      if (lens === undefined) continue
+      const lenses = alsoFoundBy.get(v.duplicateOf) ?? new Set<string>()
+      lenses.add(lens)
+      alsoFoundBy.set(v.duplicateOf, lenses)
+    }
+    findings.forEach((finding, i) => {
+      if (duplicates.has(i)) return
       const verdict = check?.verdicts.find((v) => v.index === i)
-      const suffix = verdict === undefined ? '' : ` [check: ${verdict.verdict}]`
-      lines.push(`  [${finding.severity}/10 ${finding.category}] ${finding.file}:${finding.line} ${finding.title}${suffix}`)
+      const also = [...(alsoFoundBy.get(i) ?? [])].filter((l) => l !== finding.lens)
+      const notes = [
+        ...(verdict === undefined ? [] : [`check: ${verdict.verdict}`]),
+        ...(also.length === 0 ? [] : [`also found by ${also.join(', ')}`]),
+      ]
+      const focus = finding.lens === undefined ? '' : ` · ${finding.lens}`
+      lines.push(`  [${finding.severity}/10 ${finding.category}${focus}] ${finding.file}:${finding.line} ${finding.title}` +
+                 (notes.length === 0 ? '' : ` [${notes.join(' · ')}]`))
     })
+    if (duplicates.size > 0) {
+      lines.push(`  (${duplicates.size} ${duplicates.size === 1 ? 'duplicate' : 'duplicates'} merged — found by more than one reviewer; all are in --json)`)
+    }
     if (result.output.findings.length === 0) lines.push('  no findings')
     for (const i of result.output.inconclusive) {
       lines.push(`  [?] ${i.question} — would be settled by: ${i.whatWouldSettleIt}`)
