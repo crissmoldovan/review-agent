@@ -57,5 +57,7 @@ try {
   }
   console.log('ok: the real Claude Code ran with the reviewer\'s flags and answered, at $0')
 } finally {
-  rmSync(dir, { recursive: true, force: true })
+  // Windows can hold the folder for a moment after Claude exits (EBUSY), as the product's own
+  // removeCheckout allows for: retry, and never fail a check that has already passed over clean-up.
+  try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) } catch { /* temp dir */ }
 }
