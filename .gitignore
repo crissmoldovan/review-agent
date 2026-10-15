@@ -18,3 +18,6 @@ packages/app/src/planted-by-boundary-test.ts
 # packages/cli/src/init-boundary.test.ts does the same, for the rule that keeps the registration
 # secrets off every surface.
 packages/cli/src/planted-by-init-boundary-test.ts
+
+# Left behind only if the publishing test is killed mid-run; it removes these itself.
+packages/*/.packed-*

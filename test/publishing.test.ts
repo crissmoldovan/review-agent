@@ -1,6 +1,6 @@
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
@@ -345,13 +345,18 @@ describe('what a published tarball carries', () => {
     // in beside it, which is where an install puts them.
     const cli = packed.find((p) => p.dir === 'cli')
     if (cli === undefined) throw new Error('the cli package was not packed')
-    const dir = mkdtempSync(join(destination, 'cli-unpacked-'))
-    // Run in the directory it extracts into, with a relative path: GNU tar reads `C:\…` as a host.
-    execFileSync('tar', ['-xzf', relative(dir, cli.tarball)], { cwd: dir })
-    symlinkSync(join(REPO, 'packages', 'cli', 'node_modules'), join(dir, 'package', 'node_modules'),
-      process.platform === 'win32' ? 'junction' : 'dir')
-    const printed = execFileSync(process.execPath, [join(dir, 'package', 'dist', 'index.js'), '--version'], { encoding: 'utf8' })
-    expect(printed.trim()).toBe(cli.version)
+    // Unpacked INSIDE the cli package, so Node finds the bundle's dependencies by its ordinary walk up
+    // to packages/cli/node_modules — the shape an install gives it. A link to that folder instead
+    // fails on Windows: a junction to pnpm's own junctions does not resolve. Removed afterwards.
+    const dir = mkdtempSync(join(REPO, 'packages', 'cli', '.packed-'))
+    try {
+      // Run in the directory it extracts into, with a relative path: GNU tar reads `C:\…` as a host.
+      execFileSync('tar', ['-xzf', relative(dir, cli.tarball)], { cwd: dir })
+      const printed = execFileSync(process.execPath, [join(dir, 'package', 'dist', 'index.js'), '--version'], { encoding: 'utf8' })
+      expect(printed.trim()).toBe(cli.version)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('leaves the workspace root unpublishable', () => {
