@@ -60,12 +60,12 @@ A classic token with the `repo` scope works too, and reaches every repository th
    would have:
 
    ```sh
-   npx @review-agent/cli@0.2.1 init --name "Acme Reviewer" --url https://example.com \
+   npx @review-agent/cli@0.2.2 init --name "Acme Reviewer" --url https://example.com \
      --webhook-url https://example.com/api/github/webhook --org acme --webhook-inactive
    ```
 
    ```powershell
-   npx @review-agent/cli@0.2.1 init --name "Acme Reviewer" --url https://example.com `
+   npx @review-agent/cli@0.2.2 init --name "Acme Reviewer" --url https://example.com `
      --webhook-url https://example.com/api/github/webhook --org acme --webhook-inactive
    ```
 
@@ -103,14 +103,15 @@ const checked = run(['doctor', '--repo', REPO])
 process.exit(checked !== 0 ? checked : run(['review', '--repo', REPO, '--pr', PR, '--post', '--yes']))
 ```
 
-It needs `@review-agent/app` installed beside it — `npm install --no-save @review-agent/app@0.2.1` in that directory,
+It needs `@review-agent/app` installed beside it — `npm install --no-save @review-agent/app@0.2.2` in that directory,
 which also brings the trigger.dev SDK the package depends on. Any other way of minting an installation token works the
 same: pass it to the reviewer as `GITHUB_TOKEN`, scoped to the one repository.
 
 With an installation token, `--report auto` reports with a **check run**. It decides that from one `GET /user`, which
-GitHub is expected to answer `403` for an installation token — **UNVERIFIED** by this project so far; a token
-misjudged that way falls back to a commit status when its check run is refused ([the SDK's
-reporting](../sdk.md#reporting-on-the-commit)). The capture `other-ci-app-token-log` below settles it.
+GitHub answers `403` for an installation token: seen on 2026-10-15 with GitHub Actions' own `GITHUB_TOKEN`, which is an
+installation token too ([the run](github-actions.md#4-read-the-result)). A token from your own App has not been run
+this way yet. A token misjudged as an installation falls back to a commit status when its check run is refused
+([the SDK's reporting](../sdk.md#reporting-on-the-commit)).
 
 ## 2. The job, in any shell
 
@@ -122,14 +123,14 @@ set -eu
 export NPM_CONFIG_PREFIX="$PWD/.review-agent"
 export PATH="$NPM_CONFIG_PREFIX/bin:$PATH"
 npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code \
-  @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.1
+  @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.2
 
 review-agent doctor --repo "$REPO"                              # exit 2, before anything is spent, if something is missing
 review-agent review --repo "$REPO" --pr "$PR" --post --yes
 ```
 
 with `REPO` (`owner/name`), `PR`, `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` in its environment. **With an App**, the job
-has the App's three values instead of `GITHUB_TOKEN`, runs `npm install --no-save @review-agent/app@0.2.1`, and runs
+has the App's three values instead of `GITHUB_TOKEN`, runs `npm install --no-save @review-agent/app@0.2.2`, and runs
 `node review-with-app.mjs` in place of the last two lines: the script runs both, with the token it minted.
 
 - **Both versions pinned.** Claude Code at `2.1.258`, the version the reviewer's flags were measured against and the
@@ -205,7 +206,7 @@ pipeline {
           set -eu
           export NPM_CONFIG_PREFIX="$PWD/.review-agent" PATH="$PWD/.review-agent/bin:$PATH"
           npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code \
-            @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.1
+            @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.2
           review-agent doctor --repo "$REPO"
           review-agent review --repo "$REPO" --pr "$CHANGE_ID" --post --yes
         '''
@@ -236,7 +237,7 @@ jobs:
             export REPO="$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME" PR="${CIRCLE_PULL_REQUEST##*/}"
             export NPM_CONFIG_PREFIX="$PWD/.review-agent" PATH="$PWD/.review-agent/bin:$PATH"
             npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code \
-              @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.1
+              @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.2
             review-agent doctor --repo "$REPO"
             review-agent review --repo "$REPO" --pr "$PR" --post --yes
 workflows:
@@ -263,7 +264,7 @@ steps:
       export REPO="acme/widgets" PR="$$BUILDKITE_PULL_REQUEST"
       export NPM_CONFIG_PREFIX="$$PWD/.review-agent" PATH="$$PWD/.review-agent/bin:$$PATH"
       npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code \
-        @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.1
+        @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.2
       review-agent doctor --repo "$$REPO"
       review-agent review --repo "$$REPO" --pr "$$PR" --post --yes
 ```
@@ -288,7 +289,7 @@ review-agent:
       set -eu
       export NPM_CONFIG_PREFIX="$PWD/.review-agent" PATH="$PWD/.review-agent/bin:$PATH"
       npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code \
-        @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.1
+        @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.2
       review-agent doctor --repo "$REPO"
       review-agent review --repo "$REPO" --pr "$CI_EXTERNAL_PULL_REQUEST_IID" --post --yes
 ```

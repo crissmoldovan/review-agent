@@ -74,7 +74,8 @@ review-agent review --repo acme/widgets --pr 128 --brief "src/client/ is generat
 The commands below are the captured runs of #8, #9 and #10 — #10 twice, at `thorough` and with three reviewers — the
 same in a POSIX shell and in PowerShell. Each prints the review, as [your first
 review](first-review.md#7-read-the-output)
-explains.
+explains. They were captured with 0.2.0, which printed each finding at the reviewer's own severity; from 0.2.2 the
+terminal prints the check pass's — the one a posted review uses — with `was N/10` where the two differ.
 
 ### `basic`: pull request #8
 

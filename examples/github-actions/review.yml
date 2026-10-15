@@ -130,19 +130,22 @@ jobs:
 
       - name: Set up Node.js 22
         if: steps.gate.outputs.review == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
+          # No dependency cache. This job holds the API key, and a cache entry can be written by any
+          # pull request's run; there is nothing worth caching anyway — no checkout, two npm packages.
+          package-manager-cache: false
 
       # Both pinned. Claude Code at the version the reviewer's flags were measured against (the App runner
       # pins the same, packages/app/trigger.config.ts); review-agent at the version you tested — change
-      # 0.2.0 when you upgrade. The npm that ships with Node 22 runs Claude Code's install script, which
+      # its version when you upgrade. The npm that ships with Node 22 runs Claude Code's install script, which
       # puts the real binary in place of a placeholder (spec 0.2.0 §9.4); `claude --version` fails this
       # step if it did not.
       - name: Install Claude Code and review-agent
         if: steps.gate.outputs.review == 'true'
         run: |
-          npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.1
+          npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.258 @review-agent/cli@0.2.2
           claude --version
           review-agent --version
 

@@ -25,7 +25,7 @@ The retry logic moved into the client. Check every caller still handles a 429.
 
 ## Status
 
-**`0.2.1`, early.** Use it, and read its findings as a careful colleague's first pass, not as a verdict.
+**`0.2.2`, early.** Use it, and read its findings as a careful colleague's first pass, not as a verdict.
 
 - **Built and working:** the review engine, the [CLI](docs/cli.md), and the [GitHub App](docs/deploying.md) mode —
   webhook receiver library plus [trigger.dev](https://trigger.dev) runner — which posts reviews, comments and check
@@ -39,8 +39,11 @@ The retry logic moved into the client. Check every caller still handles a 429.
   which marked a repaired finding "No longer reported". One run each is a sample, not a track record.
 - **The [SDK](docs/sdk.md)**, run for real from npm on 2026-10-15: a print-only review and a posted one
   (`reviewPullRequest()`, with the machine's Claude login and a `gh` token).
+- **[GitHub Actions](docs/guides/github-actions.md)**, run for real on 2026-10-15: the example workflow reviewed a
+  demo pull request as `github-actions[bot]` and reported with a check run.
 - **Not yet run for real:** the App's new child task per reviewer on trigger.dev.
-- **Not built yet:** a GitHub Action mode, and changing the runner's settings without editing one function.
+- **Not built yet:** a packaged GitHub Action (the [example workflow](examples/github-actions/README.md) runs the CLI
+  instead), and changing the runner's settings without editing one function.
 - **The same model varies from run to run.** One review is a sample.
 
 ## Quick start: review a pull request from your terminal

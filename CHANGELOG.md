@@ -3,6 +3,21 @@
 All five packages — `@review-agent/core`, `@review-agent/github`, `@review-agent/app`, `@review-agent/cli` and
 `@review-agent/sdk` — are released together, at the same version (the SDK from 0.2.0).
 
+## 0.2.2 — 2026-10-15
+
+- **The terminal now prints the severity the pull request is told.** With the check pass on, the CLI printed each
+  finding at the reviewer's own severity while the review it posted used the check pass's, so the same finding could
+  read 8/10 in the terminal and 7/10 on GitHub. It now prints the check pass's, with the reviewer's beside it —
+  `[7/10 correctness] … [check: confirmed, was 8/10]`. A refuted finding, which is never posted, keeps the
+  reviewer's. `--json` is unchanged: the record carries both.
+- **GitHub Actions has run for real.** The example workflow reviewed a demo pull request as `github-actions[bot]`
+  and reported with a check run, which settles that GitHub answers an Actions token's `GET /user` with 403 — the
+  call `--report auto` uses to choose a check run over a commit status. [The guide](docs/guides/github-actions.md)
+  now shows what it posted, and its log.
+- **The example workflow** uses `actions/setup-node@v7` (v4 ran on Node 20, which GitHub has deprecated) with its
+  dependency cache off — the job holds the API key — and installs `@review-agent/cli@0.2.2`. This repository's CI
+  moves to `actions/checkout@v7`, `actions/setup-node@v7` and `pnpm/action-setup@v6`.
+
 ## 0.2.1 — 2026-10-15
 
 - **Installing the CLI no longer pulls in trigger.dev.** `@trigger.dev/sdk` — and the 18 advisories `npm audit`

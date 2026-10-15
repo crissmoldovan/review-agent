@@ -296,10 +296,11 @@ const scopesOf = (headers: unknown): string[] | null => {
  *  product never reads a token's text to decide anything; the environment (`GITHUB_ACTIONS`) is a
  *  guess the spec rules out (§2.2, §5.4), since a workflow can hold a person's token; trying to
  *  create a check run is a write, and `--post` asks before it writes; and `GET /installation/
- *  repositories` would say "installation" but give no login. NOT VERIFIED by a live call while this
- *  was written (2026-10-15): that GitHub answers an installation token here with 403 rather than
- *  another 4xx. A wrong answer costs a report, not a review — a token misjudged as an installation
- *  falls back to a commit status when its check run is refused (`statusIfRefused`).
+ *  repositories` would say "installation" but give no login. Seen live on 2026-10-15: a GitHub
+ *  Actions workflow's `GITHUB_TOKEN` was answered this way and the review reported with a check run
+ *  (the demo repository's pull request #14). A wrong answer would cost a report, not a review — a
+ *  token misjudged as an installation falls back to a commit status when its check run is refused
+ *  (`statusIfRefused`).
  *
  *  401 (a bad or expired token), a 5xx, or a network failure is thrown: none of them is an answer
  *  about what the token is. */

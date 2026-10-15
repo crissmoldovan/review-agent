@@ -183,7 +183,8 @@ this pull request. Do not edit it.
 ![The summary comment of the first post on demo pull request #13, by crissmoldovan. It opens with the automated-review line — run by @crissmoldovan from the command line, tier basic, claude-opus-5, $0.33 at per-token API prices — then "Review of f616c5d", the reviewer's summary, "Intent: partial" with its note, and "Not placed inline" listing three findings: 3/10 src/payments.ts:74 baseDelayMs and maxDelayMs are not validated; 2/10 src/payments.ts:145 Retry-After: 0 is honoured as a zero wait; 1/10 src/payments.ts:111 Full jitter can yield a 0 ms wait.](images/pr13-summary-comment.png)
 
 *Screenshot 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · demo pull request #13.* The severities
-are the check pass's, so they can differ from the ones the terminal printed (4, 2 and 2).
+are the check pass's, so they differ from the ones 0.2.0 printed in the terminal (4, 2 and 2); from 0.2.2 the
+terminal prints the check pass's too.
 
 Its Markdown source, read from GitHub's API — **after** the re-review in [step 6](#6-review-again-after-a-change) had
 edited the comment in place, so this is the second review's text, at `1aaece2`, which [the screenshot
@@ -218,8 +219,9 @@ found by then.
 
 ![The one inline comment of the first post, on src/payments.ts line 99 of demo pull request #13: "Severity 7/10 · correctness", the title "Retry loop runs maxAttempts + 1 attempts", the explanation, an Evidence list of three file-and-line quotes, and a Suggested change replacing attempt > this.maxAttempts with attempt >= this.maxAttempts.](images/pr13-review-inline.png)
 
-*Screenshot 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · demo pull request #13.* The terminal
-printed this finding at 8/10, the reviewer's own severity; the comment says 7/10, the check pass's.
+*Screenshot 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · demo pull request #13.* 0.2.0
+printed this finding at 8/10 in the terminal, the reviewer's own severity; the comment says 7/10, the check pass's. From
+0.2.2 the terminal says `[7/10 …] … [check: confirmed, was 8/10]`.
 
 ### The commit status
 

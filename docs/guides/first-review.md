@@ -34,7 +34,9 @@ $0.25 model spend at per-token API prices · 7 turns · 38s · check $0.11
 ```
 
 *Captured 2026-10-15 · review-agent 0.2.0 (release build from `feat/0.2.0`) · Claude Code 2.1.289 on macOS · paid with
-the machine's Claude login (a subscription's allowance); the dollar figures are model spend at per-token API prices.*
+the machine's Claude login (a subscription's allowance); the dollar figures are model spend at per-token API prices.* The
+severities are the reviewer's own: 0.2.0 printed those. From 0.2.2 a line shows the check pass's, the one a posted
+review uses, with the reviewer's beside it when they differ.
 
 ## What you need
 
@@ -328,7 +330,7 @@ owner/name#9 at 1a2b3c4 — tier basic, claude-opus-5, effort low
 
 intent: matches — <note>
 
-  [7/10 correctness] src/a.ts:42 Off-by-one in the retry loop [check: confirmed]
+  [7/10 correctness] src/a.ts:42 Off-by-one in the retry loop [check: confirmed, was 8/10]
   [3/10 impact] src/b.ts:10 Log line repeats the token length [check: refuted]
   [?] Does the caller retry as well? — would be settled by: running the integration test
 
@@ -345,8 +347,9 @@ Line by line:
 4. **Each finding**: severity out of 10 and category (`intent`, `correctness`, `impact`, `security`), the file and
    line, the title, and the **check pass's verdict**. The check pass reads the code again and tries to disprove each
    finding: `confirmed`, `uncertain`, or `refuted`. A refuted finding would never be posted. The severity printed is
-   the reviewer's own; a posted review uses the check pass's. `no findings` is a review that found nothing — which is
-   an answer, not a failure.
+   the one a posted review uses — the check pass's — and `was 8/10` gives the reviewer's own when the check pass
+   changed it. (0.2.0 and 0.2.1 printed the reviewer's own, as in the capture at the top of this guide.) `no
+   findings` is a review that found nothing — which is an answer, not a failure.
 5. **`[?]` lines**: questions the reviewer could not settle from the code alone, and what would settle them.
 6. **The cost line**: the review's whole model spend, every pass included, **at per-token API prices** as Claude Code
    reports it; the reviewer's turns and seconds; and what the check pass cost of that total.

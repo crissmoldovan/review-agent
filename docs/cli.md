@@ -202,7 +202,7 @@ owner/name#9 at 1a2b3c4 — tier basic, claude-opus-5, effort low
 
 intent: matches — <note>
 
-  [7/10 correctness] src/a.ts:42 Off-by-one in the retry loop [check: confirmed]
+  [7/10 correctness] src/a.ts:42 Off-by-one in the retry loop [check: confirmed, was 8/10]
   [3/10 impact] src/b.ts:10 Log line repeats the token length [check: refuted]
   [?] Does the caller retry as well? — would be settled by: running the integration test
 
@@ -210,7 +210,8 @@ $1.05 model spend at per-token API prices · 21 turns · 183s · check $0.11
 ```
 
 Each finding shows its severity out of 10, its category, where it is, its title and, when the check pass ran, its
-verdict. `[?]` lines are what the reviewer could not settle on its own. A run that did not finish prints `FAILED:`
+verdict. The severity is the one a posted review uses: the check pass's, when it ran, with the reviewer's own beside
+it as `was 8/10` when the two differ (a refuted finding is never posted, and keeps the reviewer's). `[?]` lines are what the reviewer could not settle on its own. A run that did not finish prints `FAILED:`
 with the reason; a run cut off by its budget ceiling prints `CUT SHORT:` and still prints what it found. The cost is
 the review's total — every pass it bought — as the Claude Code CLI reports it: model spend at per-token API prices,
 which a subscription token draws from its allowance instead.

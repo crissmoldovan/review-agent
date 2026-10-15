@@ -224,8 +224,8 @@ the same figure is drawn from the subscription's allowance rather than billed. W
 When posting, `report: 'auto'` reports with a **check run** when the token can create one — an App's installation
 token, or GitHub Actions' `GITHUB_TOKEN` with `checks: write` — and a **commit status** when it cannot, as with a
 person's token or a bot account's. It decides with one `GET /user`: a user token is answered with its user, an
-installation token with 403 (that answer is **UNVERIFIED** against GitHub so far; if a check run is refused anyway, the
-report falls back to a status).
+installation token with 403 — seen with a GitHub Actions workflow's `GITHUB_TOKEN` on 2026-10-15, which reported with
+a check run. If a check run is refused anyway, the report falls back to a status.
 
 | The token can… | App installation token | A person's or bot account's token |
 |---|---|---|

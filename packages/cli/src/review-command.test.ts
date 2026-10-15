@@ -225,8 +225,20 @@ describe('runReviewCommand', () => {
     expect(d.downloadArchive).toHaveBeenCalledTimes(1)
 
     const text = d.out.join('')
+    // Refuted: never posted, so it is printed at the reviewer's severity, not the check's 2.
+    expect(text).toContain('[6/10 security] .github/workflows/publish.yml:100')
     expect(text).toContain('[check: refuted]')
     expect(text).toContain('$1.05')          // 0.9412 review + 0.1131 check, to the cent
+  })
+
+  it("prints a confirmed finding at the check pass's severity, the one the pull request is told", async () => {
+    const lowered: CheckVerdict = { index: 0, verdict: 'confirmed', severity: 5, reason: 'r', evidence: [] }
+    const d = deps({ runCheckPass: vi.fn(async () => ({ verdicts: [lowered], usage: CHECK_USAGE })) })
+    expect(await runReviewCommand({ repo: 'acme/widgets', pr: '16', check: true }, d)).toBe(0)
+    const text = d.out.join('')
+    expect(text).toContain('[5/10 security] .github/workflows/publish.yml:100')
+    expect(text).toContain('[check: confirmed, was 6/10]')
+    expect(text).not.toContain('[6/10')
   })
 
   // tier `normal` presets check: true (Task 3), so this proves --skip-check reaches settings.check
@@ -792,7 +804,7 @@ describe('runReviewCommand: a multi-reviewer review printed (spec 0.2.0 §8.3)',
     const out = d.out.join('')
     expect(out).toContain('tokens signed with a previous key never expire')
     expect(out).not.toContain('previous-key tokens are accepted after they expire')
-    expect(out).toMatch(/\[6\/10 security · intent reviewer\] .*never expire \[check: confirmed · also found by security\]/)
+    expect(out).toMatch(/\[9\/10 security · intent reviewer\] .*never expire \[check: confirmed, was 6\/10 · also found by security\]/)
     expect(out).toContain('1 duplicate merged')
     expect(out).toContain('the refresh route still uses the bare secret')
   })

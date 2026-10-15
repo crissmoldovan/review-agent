@@ -336,15 +336,21 @@ const render = (review: RunReviewResult): string => {
     findings.forEach((finding, i) => {
       if (duplicates.has(i)) return
       const verdict = check?.verdicts.find((v) => v.index === i)
+      // At the check pass's severity, as posting says it (`selectForPosting`), so the terminal and
+      // the pull request give one number; the reviewer's own is kept beside it. A refuted finding is
+      // never posted, so it keeps the reviewer's. Measured 2026-10-15: the demo's pull request #14
+      // printed 8/10 where the review it posted said 7/10.
+      const severity = verdict === undefined || verdict.verdict === 'refuted' ? finding.severity : verdict.severity
       const also = [...(alsoFoundBy.get(i) ?? [])].filter((l) => l !== finding.lens)
       const notes = [
-        ...(verdict === undefined ? [] : [`check: ${verdict.verdict}`]),
+        ...(verdict === undefined ? [] : [`check: ${verdict.verdict}` +
+          (severity === finding.severity ? '' : `, was ${finding.severity}/10`)]),
         ...(also.length === 0 ? [] : [`also found by ${also.join(', ')}`]),
       ]
       // The focus that found it, when it says something the category does not (`impact` found by the
       // impact reviewer needs no second word).
       const focus = finding.lens === undefined || finding.lens === finding.category ? '' : ` · ${finding.lens} reviewer`
-      lines.push(`  [${finding.severity}/10 ${finding.category}${focus}] ${finding.file}:${finding.line} ${finding.title}` +
+      lines.push(`  [${severity}/10 ${finding.category}${focus}] ${finding.file}:${finding.line} ${finding.title}` +
                  (notes.length === 0 ? '' : ` [${notes.join(' · ')}]`))
     })
     if (duplicates.size > 0) {

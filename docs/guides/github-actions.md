@@ -5,8 +5,9 @@ and anyone with push access can ask for another review by commenting `/review`. 
 and no server to run: the workflow installs Claude Code and the `review-agent` CLI and runs one review per pull
 request, posting as `github-actions[bot]` (use case UC-4 in [the 0.2.0 spec](../specs/0.2.0-ways-in.md#1-use-cases)).
 
-*Not captured yet: the workflow has not run on the demo repository, which had no `ANTHROPIC_API_KEY` secret (and no
-workflow file) when these guides were captured, 2026-10-15. What it posts is described below from the code, not shown.*
+It has run on the demo repository, [`crissmoldovan/review-agent-demo`](https://github.com/crissmoldovan/review-agent-demo):
+pull request [#14](https://github.com/crissmoldovan/review-agent-demo/pull/14) was reviewed by this workflow, and
+[step 4](#4-read-the-result) shows what it posted.
 
 What it posts on each reviewed pull request:
 
@@ -55,20 +56,20 @@ it — it runs with your API key. From the root of a clone of your repository:
 
 ```sh
 mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.0/examples/github-actions/review.yml \
+curl -fsSL https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.2/examples/github-actions/review.yml \
   -o .github/workflows/review-agent.yml
 ```
 
 ```powershell
 New-Item -ItemType Directory -Force .github/workflows | Out-Null
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.0/examples/github-actions/review.yml `
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/crissmoldovan/review-agent/v0.2.2/examples/github-actions/review.yml `
   -OutFile .github/workflows/review-agent.yml
 ```
 
 The file pins two versions. Keep both pinned, and change them on purpose:
 
 - `@anthropic-ai/claude-code@2.1.258` — the Claude Code the reviewer's flags were measured against;
-- `@review-agent/cli@0.2.1` — the reviewer.
+- `@review-agent/cli@0.2.2` — the reviewer.
 
 ## 3. Open a pull request
 
@@ -88,20 +89,60 @@ once the file is merged.
 
 ## 4. Read the result
 
-A review takes a few minutes. On the pull request:
+A `basic` review of a small pull request takes about a minute; a larger one, or a higher tier, takes longer. On the
+pull request:
 
 1. The checks list shows two checks: **`review-agent runner`**, the job, and **`review-agent`**, the review's own
-   check run, which ends with the review's conclusion.
-2. The summary comment from `github-actions[bot]` says what was found and what it cost.
-3. Inline comments sit on the lines they are about.
+   check run, which ends with the review's conclusion. Its page says what was found, at what tier and cost, and
+   links to the summary comment:
 
-*Not captured yet: it needs a run of the workflow on the demo repository, which has not happened (see the top of this
-guide).*
+   ![The review-agent check run of demo pull request #14, from GitHub Actions: "succeeded in 33s", titled "3 findings, worst 7/10", then "Reviewed c85133f — tier basic, model claude-opus-5, $0.20. 3 findings, 3 posted as comments." and a link, "The full summary". Beside it, the workflow's two checks: review-agent runner and review-agent.](images/pr14-actions-check-run.png)
 
-The job's log, under **Actions → review-agent → the run**, shows what the CLI did. Its last lines say what was posted
-and how it was reported:
+   "Posted as comments" counts every finding the comments mention: here one inline comment, and two findings in the
+   summary comment.
 
-*Not captured yet, for the same reason: no run of the workflow on the demo repository.*
+2. The summary comment from `github-actions[bot]` opens with the automated-review line — run from GitHub Actions,
+   the tier, the model and what it cost — then what was found:
+
+   ![The summary comment on demo pull request #14 by github-actions (Bot): "Automated review by review-agent · run from GitHub Actions · tier basic · claude-opus-5 · $0.20 (model spend at per-token API prices)", then "Review of c85133f", the reviewer's summary of the change, "Intent: partial" with its note, and "Not placed inline" listing two 3/10 findings: no test for JPY or zero, and order list responses that still have no totalDisplay.](images/pr14-actions-summary.png)
+
+3. Inline comments sit on the lines they are about, in one review from `github-actions[bot]`:
+
+   ![The review by github-actions (Bot) on demo pull request #14, opening with the same automated-review line, and its one inline comment on src/format.ts line 16: "Severity 7/10 · correctness", the title "formatMoney assumes 2 minor units, so JPY is 100x wrong", the explanation, an Evidence list of three file-and-line quotes, and a Suggested change that reads the currency's minorUnits instead of dividing by 100.](images/pr14-actions-review.png)
+
+The job's log, under **Actions → review-agent → the run**, shows what the CLI did. Everything the CLI printed in
+the **Review and post** step:
+
+```text
+This will post as this token's GitHub App installation on crissmoldovan/review-agent-demo#14: a review with inline comments, a summary comment and a check run "review-agent" (a commit status, if the token cannot create one).
+review published
+crissmoldovan/review-agent-demo#14 at c85133f — tier basic, claude-opus-5, effort low
+
+The PR adds `formatMoney()` in src/format.ts and attaches a `totalDisplay` string to the single-order response in serializeOrder. It largely matches the brief, but formatMoney hardcodes two decimal places and division by 100, so JPY — a supported currency with zero minor units — is formatted 100x too small. The brief's claim that "every order response" carries totalDisplay is also not met: the `GET /orders` summary shape is unchanged. Tests cover only 2-decimal currencies, so the JPY case goes undetected.
+
+intent: partial — Formatting moved server-side as described, but only on serializeOrder; the list endpoint's summary shape still lacks totalDisplay, and JPY formatting is incorrect.
+
+  [8/10 correctness] src/format.ts:16 formatMoney assumes 2 minor units, so JPY is 100x wrong [check: confirmed]
+  [4/10 intent] src/http/serialize.ts:36 Order list responses still have no totalDisplay [check: confirmed]
+  [3/10 correctness] test/format.test.ts:5 No test for JPY or zero [check: confirmed]
+
+$0.20 model spend at per-token API prices · 5 turns · 20s · check $0.09
+
+posted 1 inline comment and a summary comment: https://github.com/crissmoldovan/review-agent-demo/pull/14#issuecomment-6186154495
+reported with a check run: success (https://github.com/crissmoldovan/review-agent-demo/runs/116285796494)
+```
+
+*Captured 2026-10-15 · review-agent 0.2.1 · Claude Code 2.1.258 on `ubuntu-latest` · demo pull request #14, opened
+with the [example workflow](../../examples/github-actions/review.yml) at `@review-agent/cli@0.2.1` · paid with the
+demo repository's API key: $0.20 model spend at per-token API prices.* The first line is the token's identity, found
+with one call to GitHub: GitHub Actions' `GITHUB_TOKEN` is an App installation token, so the review reported with a
+check run. The job took 49 seconds: 6 to install the two packages, 35 to review and post. 0.2.1 printed each finding
+at the reviewer's own severity (8 and 4), while the review it posted used the check pass's (7 and 3); from 0.2.2 the
+log prints the check pass's, as `[7/10 …] … [check: confirmed, was 8/10]`.
+
+Every comment on a pull request starts a run of this workflow, a bot's included. One that is not a `/review` from
+someone allowed to ask shows in **Actions** as a **skipped** run: it was stopped before a runner started, and cost
+nothing.
 
 **If you see this instead**
 
@@ -185,14 +226,14 @@ What a required check asks of every pull request:
 | What | Who charges | How much |
 |---|---|---|
 | The model | Anthropic, to the API key — **per-token API prices** | **measured** with `claude-opus-5`: $0.88–1.06 for a `basic` review of a real production pull request; $0.16–0.29 for a one-file pull request, check pass included; $1.57–1.67 for a `normal` review before its check pass. `thorough`: $0.62–0.89 in all on the demo's small pull requests (measured 2026-10-15, with `--budget 4`: [the runs](choosing-a-tier.md#what-the-runs-cost)), not yet on a production pull request. Hard ceilings: $5.00 `basic`, $7.50 `normal`, $20.00 `thorough` ([what it costs](../../README.md#what-it-costs)) |
-| The runner | GitHub, at **GitHub's price** for your plan | free on GitHub-hosted runners for public repositories. A job lasts about as long as its review — 2–7 minutes measured for `basic` and `normal` — plus installing two npm packages, **not measured** |
+| The runner | GitHub, at **GitHub's price** for your plan | free on GitHub-hosted runners for public repositories. A job lasts about as long as its review — 2–7 minutes measured for `basic` and `normal` on the command line — plus installing two npm packages: 6 seconds measured on `ubuntu-latest`. The demo's one-file pull request took 49 seconds in all (2026-10-15, [step 4](#4-read-the-result)) |
 
 Each summary comment says what its review cost. A single review is a sample, not a verdict: the same model can find
 different things on two runs of the same pull request.
 
 ## Upgrading
 
-Change `@review-agent/cli@0.2.1` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
+Change `@review-agent/cli@0.2.2` in the workflow to the new version, read the [changelog](../../CHANGELOG.md), and open
 a pull request — it is reviewed by the new version. Change `@anthropic-ai/claude-code@2.1.258` only when a release of
 the reviewer says to.
 
